@@ -5,11 +5,24 @@ from q_learning_skeleton import *
 
 def act_loop(env, agent, num_episodes):
     """
-    TODO: Complete the loop of the Q-learning agent.
+    Completed the loop of the Q-learning agent.
     """
-    print("Hello from q_learning_main.py")
     for episode in range(num_episodes):
-        pass
+        state = env.reset()
+        agent.reset_episode(state)
+
+        print('---episode %d---' % episode)
+
+        for t in range(MAX_EPISODE_LENGTH):
+            action = agent.select_action(state)
+            next_state, reward, done, _ = env.step(action)
+            agent.process_experience(state, action, next_state, reward, done)
+            state = next_state
+
+            if done:
+                print("Episode finished after {} timesteps".format(t + 1))
+                agent.report()
+                break
     env.close()
 
 
