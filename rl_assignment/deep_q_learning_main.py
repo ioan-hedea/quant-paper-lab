@@ -40,6 +40,7 @@ def act_loop(env, agent, num_episodes, printing=False):
 
             agent.process_experience(action, observation, reward, done)
             if done:
+                agent.sync_target_network()
                 print("Episode finished after {} timesteps".format(t+1))
                 # env.render()
                 agent.report()
@@ -62,13 +63,10 @@ if __name__ == "__main__":
         shape_o = (9,)
 
     qn = QNet_MLP(num_a, shape_o)
+    target_qn = QNet_MLP(num_a, shape_o)
 
     discount = DEFAULT_DISCOUNT
 
-    ql = QLearner(env, qn, discount)
-
-    """"
-    TODO: Add target network."
-    """
+    ql = QLearner(env, qn, discount, target_q_function=target_qn)
 
     act_loop(env, ql, NUM_EPISODES)

@@ -24,21 +24,37 @@ LEARNINGRATENET = 0.0001  # QNET
 
 class ReplayMemory(object):
     """
-    TODO: Implement experience replay.
+    Implement experience replay.
 
     ReplayMemory should store the last "size" experiences
     and be able to return a randomly sampled batch of experiences.
     """
     def __init__(self, size):
-        pass
+        self.size = size
+        self.memory = []
+        self.next_idx = 0
 
     # Store experience in memory
     def store_experience(self, prev_obs, action, observation, reward, done):
-        pass
+        exp = (prev_obs, action, observation, reward, done)
+        if len(self.memory) < self.size:
+            self.memory.append(exp)
+        else:
+            self.memory[self.next_idx] = exp
+        self.next_idx = (self.next_idx + 1) % self.size
 
     # Randomly sample "batch_size" experiences from the memory and return them
     def sample_batch(self, batch_size):
-        pass
+        sampled = random.sample(self.memory, batch_size)
+        prev_obs, actions, obs, rewards, dones = zip(*sampled)
+        return (np.array(prev_obs),
+                np.array(actions, dtype=np.int64),
+                np.array(obs),
+                np.array(rewards, dtype=np.float32),
+                np.array(dones, dtype=np.float32))
+
+    def __len__(self):
+        return len(self.memory)
 
 
 # DEBUG=True
@@ -52,6 +68,10 @@ class QNet(nn.Module):
 
         self.discount = discount
         self.learning_rate = learning_rate
+        self.target_network = None
+
+    def set_target_network(self, target_network):
+        self.target_network = target_network
 
     def init_optimizer(self):
         self.loss_fn = torch.nn.MSELoss(reduction='sum')
@@ -113,7 +133,8 @@ class QNet(nn.Module):
         if done:
             future_val = 0
         else:
-            future_val = self.max_Q_value(t_observation)
+            future_q_net = self.target_network if self.target_network is not None else self
+            future_val = future_q_net.max_Q_value(t_observation)
         # The above lines evaluate the QNet but of course... the effect of the QNet parameters
         # on the *next-stage* value is ignored by Q-learning.
         # (residual gradient algorithms do takes this into account,
@@ -147,7 +168,8 @@ class QNet(nn.Module):
     def batch_Q_update(self, obs, actions, next_obs, rewards, dones):
 
         batch_size = len(dones)
-        v_next_obs = self.max_Q_value(next_obs, batch_size)
+        future_q_net = self.target_network if self.target_network is not None else self
+        v_next_obs = future_q_net.max_Q_value(next_obs, batch_size)
         not_dones = 1 - dones
         fut_values = self.discount * v_next_obs * not_dones
         targets = rewards + fut_values
@@ -197,9 +219,13 @@ class QNet_MLP(QNet):
 
 
 class QLearner(object):
-    def __init__(self, env, q_function, discount=DEFAULT_DISCOUNT, rm_size=RMSIZE):
+    def __init__(self, env, q_function, discount=DEFAULT_DISCOUNT, rm_size=RMSIZE, target_q_function=None):
         self.env = env
         self.Q = q_function
+        self.target_Q = target_q_function
+        if self.target_Q is not None:
+            self.target_Q.load_state_dict(self.Q.state_dict())
+            self.Q.set_target_network(self.target_Q)
         self.rm = ReplayMemory(rm_size)  # replay memory stores (a subset of) experience across episode
         self.discount = discount
 
@@ -233,14 +259,17 @@ class QLearner(object):
         self.dis_r += reward * (self.discount ** self.stage)
         self.stage += 1
         self.Q.single_Q_update(prev_observation, action, observation, reward, done)
+        self.rm.store_experience(prev_observation, action, observation, reward, done)
+
+        if len(self.rm) >= self.batch_size:
+            batch = self.rm.sample_batch(self.batch_size)
+            self.Q.batch_Q_update(*batch)
+
         self.last_obs = observation
 
-        """
-        TODO: Do a batch update using experience stored in the replay memory
-        Sample a batch of batch_size from the replay memory
-        and update the network using this batch (batch_Q_update)
-        """
-        pass
+    def sync_target_network(self):
+        if self.target_Q is not None:
+            self.target_Q.load_state_dict(self.Q.state_dict())
 
     def select_action(self):
         """
