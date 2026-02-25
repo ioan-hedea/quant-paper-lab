@@ -22,7 +22,7 @@ u   = 0.1;             % constant control input (students may change)
 % Add disturbance at a chosen time step:
 
 disturbance_step = 15;  % time step when disturbance is exerted (students may change)
-d = [1; -1];            % disturbance vector (students may change)
+d = [0; 0];             % disturbance vector (default base run: no disturbance)
 
 %% Simulate open-loop trajectory
 
