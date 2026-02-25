@@ -3,6 +3,8 @@
 Python translation of mpc/Module_one.m.
 """
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -42,4 +44,11 @@ plt.ylabel("State components")
 plt.title("Module 1: Open-loop state prediction")
 plt.legend()
 plt.tight_layout()
+
+fig_dir = Path(__file__).resolve().parent / "figures"
+fig_dir.mkdir(parents=True, exist_ok=True)
+fig_path = fig_dir / "module1_open_loop.png"
+plt.savefig(fig_path, dpi=200, bbox_inches="tight")
+print(f"Saved figure: {fig_path}")
+
 plt.show()

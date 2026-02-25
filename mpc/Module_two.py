@@ -6,6 +6,8 @@ Requires: numpy, scipy, matplotlib.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -152,6 +154,12 @@ axes[2].set_title("Input-constraint activation")
 
 fig.tight_layout()
 
+fig_dir = Path(__file__).resolve().parent / "figures"
+fig_dir.mkdir(parents=True, exist_ok=True)
+fig_path = fig_dir / "module2_closed_loop.png"
+fig.savefig(fig_path, dpi=200, bbox_inches="tight")
+print(f"Saved figure: {fig_path}")
+
 # Set this True to reproduce Module 2 Question 5 (terminal-cost comparison)
 run_terminal_cost_comparison = False
 
@@ -193,5 +201,8 @@ if run_terminal_cost_comparison:
     axes2[2].set_title("Input-constraint activation (no P vs with P)")
 
     fig2.tight_layout()
+    fig_path2 = fig_dir / "module2_terminal_cost_comparison.png"
+    fig2.savefig(fig_path2, dpi=200, bbox_inches="tight")
+    print(f"Saved figure: {fig_path2}")
 
 plt.show()
