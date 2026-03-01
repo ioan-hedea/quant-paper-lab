@@ -61,6 +61,10 @@ x_nom[:, 0] = x0
 x_act[:, 0] = x0
 
 
+def format_vec(vec: np.ndarray) -> str:
+    return "_".join(f"{float(v):g}".replace("-", "m").replace(".", "p") for v in vec)
+
+
 def build_prediction_matrices(a: np.ndarray, b: np.ndarray, horizon: int) -> tuple[np.ndarray, np.ndarray]:
     phi = np.zeros((nx * horizon, nx))
     gamma = np.zeros((nx * horizon, nu * horizon))
@@ -140,7 +144,13 @@ fig.tight_layout()
 
 fig_dir = Path(__file__).resolve().parent / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
-fig_path = fig_dir / "module3_tube_mpc.png"
+fig_path = fig_dir / (
+    f"module3_tube_mpc_np_{Np}"
+    f"_x0_{format_vec(x0)}"
+    f"_db_{disturbance_bound:g}"
+    f"_qerr_{format_vec(np.diag(Qerror))}"
+    f"_rerr_{Rerror[0,0]:g}.png"
+)
 fig.savefig(fig_path, dpi=200, bbox_inches="tight")
 print(f"Saved figure: {fig_path}")
 

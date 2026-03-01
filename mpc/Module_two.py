@@ -32,7 +32,7 @@ nu = B.shape[1]
 # -------------------- Simulation settings ---------------------------
 Nsim = 40
 x0 = np.array([-3.0, 2.0])
-Np = 3  # try 3, 10, 30
+Np = 30  # try 3, 10, 30
 
 # -------------------- Cost matrices (students tune) -----------------
 Q = np.diag([5.0, 1.0])
@@ -43,6 +43,10 @@ umin = -0.8
 umax = 0.8
 xmin = np.array([-5.0, -5.0])
 xmax = np.array([5.0, 5.0])
+
+
+def format_vec(vec: np.ndarray) -> str:
+    return "_".join(f"{float(v):g}".replace("-", "m").replace(".", "p") for v in vec)
 
 
 def build_prediction_matrices(a: np.ndarray, b: np.ndarray, horizon: int) -> tuple[np.ndarray, np.ndarray]:
@@ -156,7 +160,12 @@ fig.tight_layout()
 
 fig_dir = Path(__file__).resolve().parent / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
-fig_path = fig_dir / "module2_closed_loop.png"
+fig_path = fig_dir / (
+    f"module2_closed_loop_np_{Np}"
+    f"_x0_{format_vec(x0)}"
+    f"_q_{format_vec(np.diag(Q))}"
+    f"_r_{R[0,0]:g}.png"
+)
 fig.savefig(fig_path, dpi=200, bbox_inches="tight")
 print(f"Saved figure: {fig_path}")
 
@@ -201,7 +210,12 @@ if run_terminal_cost_comparison:
     axes2[2].set_title("Input-constraint activation (no P vs with P)")
 
     fig2.tight_layout()
-    fig_path2 = fig_dir / "module2_terminal_cost_comparison.png"
+    fig_path2 = fig_dir / (
+        f"module2_terminal_cost_comparison_np_{Np}"
+        f"_x0_{format_vec(x0)}"
+        f"_q_{format_vec(np.diag(Q))}"
+        f"_r_{R[0,0]:g}.png"
+    )
     fig2.savefig(fig_path2, dpi=200, bbox_inches="tight")
     print(f"Saved figure: {fig_path2}")
 
