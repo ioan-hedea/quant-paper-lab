@@ -38,7 +38,7 @@ disturbance_step = 15
 d = np.array([0.0, 0.0])
 
 # Set to True for Question 5
-run_closed_loop_preview = False
+run_closed_loop_preview = True
 
 # Simulate open-loop trajectory
 x = np.zeros((2, Nsim + 1))
@@ -71,8 +71,6 @@ base_name = (
 fig_path = fig_dir / base_name
 fig.savefig(fig_path, dpi=200, bbox_inches="tight")
 print(f"Saved figure: {fig_path}")
-
-
 if run_closed_loop_preview:
     q_lqr = np.diag([1.0, 0.2])
     r_lqr = np.array([[0.5]])
