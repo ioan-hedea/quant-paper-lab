@@ -15,3 +15,8 @@ The original code can be cited as follows:
 
 - Linear programming IRL. From Ng & Russell, 2000. Small state space linear programming IRL.
 - Gridworld (Sutton, 1998)
+
+
+
+# Run 
+uv run --with numpy --with matplotlib --with cvxopt python3 irl/main.py 

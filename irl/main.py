@@ -8,8 +8,8 @@ matthew.alger@anu.edu.au
 import numpy as np
 import matplotlib.pyplot as plt
 
-import irl.linear_irl as linear_irl
-import irl.mdp.gridworld as gridworld
+import linear_irl as linear_irl
+import gridworld as gridworld
 
 def main(grid_size, discount):
     """
