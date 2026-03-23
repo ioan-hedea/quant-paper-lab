@@ -1,146 +1,54 @@
 # Sequential Decision-Making
 
-This repository contains implementations and exercises for reinforcement learning algorithms, focusing on Q-Learning and Deep Q-Learning approaches for sequential decision-making problems.
+This repository collects course and research-style implementations across reinforcement learning, planning, control, verification, and quantitative trading. The strongest end-to-end artifact in the repo is the modular quant pipeline in [`stock_trading`](stock_trading), which combines classical alpha models with reinforcement-learning-based portfolio control, execution, and hedging.
 
-## Overview
+## Repository Map
 
-### Q-Learning (`q_learning_*`)
-Classic Q-Learning agent that learns optimal policies in discrete state-action environments using a Q-table.
+- [`stock_trading`](stock_trading): quantitative trading experiments, including the modular `quant_stack` pipeline and generated figures.
+- [`depp_rl`](depp_rl): tabular and deep RL assignments, skeletons, and recorded training artifacts.
+- [`mdp_dp`](mdp_dp): dynamic-programming visualizations for value iteration and policy iteration.
+- [`pomdp`](pomdp): belief-space POMDP examples and visualizations.
+- [`pomcp`](pomcp): online Monte Carlo planning examples such as Tiger and RockSample.
+- [`model_based_rl`](model_based_rl): model-based RL visualization material.
+- [`bayesian_rl`](bayesian_rl): Bayesian bandits and Thompson sampling illustrations.
+- [`safe_rl`](safe_rl): safe RL and robust/constrained MDP visualizations.
+- [`verification`](verification): reachability, BMC, and verification-oriented figures.
+- [`mpc`](mpc): MPC coursework, figures, and report artifacts.
+- [`irl`](irl): inverse RL, neural certificates, and SMT-based components.
 
-**Features:**
-- Discrete state and action spaces
-- Q-table based value function
-- Epsilon-greedy action selection
-- Temporal Difference (TD) learning updates
+## Quant Pipeline Quick Start
 
-**Environment:** DrunkenWalkEnv - A custom grid-world environment where an agent navigates through terrain with:
-- `S`: Starting position
-- `.`: Normal pavement
-- `H`: Pothole (20% chance of tripping with -10 penalty)
-- `G`: Goal (reward of +10)
+The cleaned trading pipeline keeps the existing run command:
 
-Available maps:
-- `"theAlley"`: 1D linear path
-- `"walkInThePark"`: 6x8 grid with potholes
-- `"4x4"`, `"8x8"`: Classic grid sizes
-
-### Deep Q-Learning (`deep_q_learning_*`)
-Deep Q-Network (DQN) agent that learns policies using a neural network to approximate Q-values.
-
-**Features:**
-- Neural network (MLP) for Q-value approximation
-- Experience replay memory (configurable size)
-- Batch training with PyTorch
-- Epsilon decay for exploration-exploitation trade-off
-- GPU acceleration support (falls back to CPU if unavailable)
-
-**Environment:** LunarLander-v2 (from OpenAI Gym)
-- Continuous state space (8 dimensions)
-- 4 discrete actions
-- Goal: Land the lunar lander safely
-
-**Key Hyperparameters:**
-- `NUM_EPISODES`: 500
-- `RMSIZE`: 10,000 (replay memory size)
-- `BATCH_SIZE`: 256
-- `DEFAULT_DISCOUNT`: 0.99
-- `EPSILON`: Initial exploration rate
-- `LEARNINGRATENET`: 0.0001
-
-## Dependencies
-
-- Python 3.7+
-- `gym`: OpenAI Gym environment framework
-- `numpy`: Numerical computing
-- `torch`: PyTorch deep learning framework
-
-Install dependencies:
 ```bash
-pip install gym numpy torch
+MPLCONFIGDIR=/tmp/matplotlib uv run python stock_trading/quant_pipeline.py
 ```
 
-## Usage
+Optional data enrichments:
 
-### Q-Learning
-```python
-python q_learning_main.py
-```
-
-Modify environment in `q_learning_main.py`:
-```python
-env = simple_grid.DrunkenWalkEnv(map_name="walkInThePark")
-# or try:
-# env = simple_grid.DrunkenWalkEnv(map_name="theAlley")
-```
-
-### Deep Q-Learning
-```python
-python deep_q_learning_main.py
-```
-
-Recorded episodes are saved to `./recorded_episodes/` for analysis.
-
-## Exercise Tasks
-
-### Q-Learning Skeleton (`q_learning_skeleton.py`)
-Implement the `QLearner` class:
-- `__init__`: Initialize Q-table and hyperparameters
-- `select_action(state)`: Epsilon-greedy action selection
-- `process_experience()`: Q-value updates using TD learning
-- `reset_episode()`: Episode initialization and stats tracking
-- `report()`: Print agent statistics
-
-### Deep Q-Learning Skeleton (`deep_q_learning_skeleton.py`)
-Implement:
-- `ReplayMemory`: Store and sample experience transitions
-  - `store_experience()`: Add transitions to memory
-  - `sample_batch()`: Random batch sampling
-- Integrate batch training loop in `process_experience()`
-- Implement target network (TODO in main file)
-
-## Algorithm Details
-
-### Q-Learning Update Rule
-$$Q(s,a) \leftarrow Q(s,a) + \alpha[r + \gamma \max_a Q(s',a) - Q(s,a)]$$
-
-Where:
-- $\alpha$: Learning rate
-- $r$: Immediate reward
-- $\gamma$: Discount factor
-- $s'$: Next state
-
-### DQN with Experience Replay
-1. Store transitions $(s, a, r, s', \text{done})$ in replay memory
-2. Sample random minibatch from memory
-3. Compute target: $y = r + \gamma \max_a Q(s', a; \theta^-)$
-4. Update network parameters via gradient descent
-
-## Configuration
-
-Key parameters in skeleton files:
-- `NUM_EPISODES`: Number of training episodes
-- `MAX_EPISODE_LENGTH`: Maximum steps per episode
-- `DEFAULT_DISCOUNT`: Discount factor ($\gamma$)
-- `EPSILON`: Exploration rate
-- `LEARNINGRATE`: Learning rate ($\alpha$)
-- `BATCH_SIZE`: Minibatch size for DQN
-
-## Docker
-
-Build and run in Docker:
 ```bash
-docker build -t rl-assignment ./docker
-docker run -it rl-assignment python deep_q_learning_main.py
+FRED_API_KEY="your_key" \
+SEC_USER_AGENT="Your Name your_email@example.com" \
+MPLCONFIGDIR=/tmp/matplotlib \
+uv run python stock_trading/quant_pipeline.py
 ```
 
-## References
+More detailed usage, architecture notes, and file-level documentation live in [`stock_trading/README.md`](stock_trading/README.md).
 
-- Sutton, R. S., & Barto, A. G. (2018). *Reinforcement Learning: An Introduction*
-- Mnih, V., et al. (2015). Human-level control through deep reinforcement learning. *Nature*
-- OpenAI Gym: https://www.gymlibrary.dev/
+## Quant Pipeline Structure
+
+The large trading script has been split into a small package under [`stock_trading/quant_stack`](stock_trading/quant_stack):
+
+- [`config.py`](stock_trading/quant_stack/config.py): universe, macro series, and runtime constants.
+- [`data.py`](stock_trading/quant_stack/data.py): market, macro, and SEC loaders.
+- [`alpha.py`](stock_trading/quant_stack/alpha.py): factor, pairs, GARCH, HMM, LSTM, and alpha-combination logic.
+- [`rl.py`](stock_trading/quant_stack/rl.py): portfolio, execution, and hedging RL agents.
+- [`pipeline.py`](stock_trading/quant_stack/pipeline.py): walk-forward backtest orchestration.
+- [`plots.py`](stock_trading/quant_stack/plots.py): performance, diagnostics, and execution figures.
+- [`main.py`](stock_trading/quant_stack/main.py): CLI entrypoint used by the thin wrapper in [`quant_pipeline.py`](stock_trading/quant_pipeline.py).
 
 ## Notes
 
-- Time horizon consideration in DQN: Remaining time (1000 - t)/1000 is appended to observations
-- Gradient clipping is applied in single Q-updates to prevent exploding gradients
-- Episode videos are recorded every 10 episodes in deep Q-learning
+- The repo mixes lightweight demos and richer research prototypes; not every folder follows the same packaging style.
+- The quant pipeline is backtest-oriented and should still be treated as research code, not production trading software.
+- Generated plots in [`stock_trading`](stock_trading) document the latest run, but they are only as realistic as the underlying data and lag assumptions.

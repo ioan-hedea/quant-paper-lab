@@ -1,0 +1,492 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{xcolor}
+
+\title{A Modular Quantitative Trading Pipeline\\
+\large Alpha Generation, Reinforcement Learning Control, and Risk-Aware Backtesting}
+\author{Ioan Hedea}
+\date{March 23, 2026}
+
+\begin{document}
+\begin{titlepage}
+\centering
+{\Huge \bfseries A Modular Quantitative Trading Pipeline\par}
+\vspace{0.6cm}
+{\Large Alpha Generation, Reinforcement Learning Control, and Risk-Aware Backtesting\par}
+\vspace{1.5cm}
+{\large Sequential Decision-Making Project\par}
+\vspace{0.4cm}
+{\large Ioan Hedea\par}
+\vspace{0.4cm}
+{\large March 23, 2026\par}
+\vfill
+\fcolorbox{black}{gray!10}{
+\parbox{0.88\textwidth}{
+\textbf{Executive summary.} The pipeline combines cross-sectional factor investing,
+statistical arbitrage, volatility and regime modeling, and a lightweight recurrent
+forecast sleeve with reinforcement-learning-based portfolio sizing and dynamic
+hedging. The current implementation is modularized under \texttt{stock\_trading/quant\_stack}
+and preserves a thin legacy entrypoint for reproducible runs.
+}
+}
+\vfill
+\end{titlepage}
+
+\begin{abstract}
+This report documents a modular quantitative trading pipeline implemented in the
+\texttt{quant\_stack} package under \texttt{stock\_trading}. The system combines
+cross-sectional factor signals, statistical arbitrage, volatility forecasting,
+regime detection, and a lightweight recurrent forecast sleeve with
+reinforcement-learning-based portfolio allocation, hedging, and execution
+demonstrations. The resulting design is intentionally hybrid: classical
+quantitative finance supplies the alpha and risk features, while reinforcement
+learning is used where it is most natural, namely dynamic sizing, exposure
+control, and sequential decision-making under changing market conditions.
+\end{abstract}
+
+\section{Objective}
+
+The goal of the project is not simply to outperform a benchmark on raw return.
+The stronger objective is to construct a research pipeline that is:
+
+\begin{itemize}[leftmargin=1.5em]
+\item broad enough to resemble a multi-sleeve quantitative strategy,
+\item modular enough to be maintained and extended cleanly,
+\item financially grounded rather than purely heuristic,
+\item explicit about where reinforcement learning helps and where it does not.
+\end{itemize}
+
+In this design, the alpha layer identifies opportunities, while the RL layer
+decides how aggressively to express them and how to protect the portfolio in
+stress.
+
+\section{Architecture}
+
+At a high level, the system is organized as
+
+\[
+\begin{aligned}
+\text{Data} &\rightarrow \text{Features} \rightarrow \text{Alpha Models} \\
+&\rightarrow \text{Adaptive Combiner} \rightarrow \text{Portfolio RL} \\
+&\rightarrow \text{Hedging / Cash} \rightarrow \text{Backtest and Diagnostics}.
+\end{aligned}
+\]
+
+\subsection{Code Structure}
+
+The implementation is separated into the following modules:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Module & Responsibility \\
+\midrule
+\texttt{config.py} & Universe, constants, and external series identifiers \\
+\texttt{data.py} & Market, macro, and SEC data loading \\
+\texttt{alpha.py} & Factor, pairs, GARCH, HMM, LSTM, and signal combination \\
+\texttt{rl.py} & Portfolio construction, execution, and hedge RL agents \\
+\texttt{pipeline.py} & Walk-forward backtest orchestration \\
+\texttt{plots.py} & Performance, diagnostics, and execution figures \\
+\texttt{main.py} & CLI entrypoint used by the wrapper script \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This separation keeps the external entrypoint stable while making the internal
+system easier to reason about and extend.
+
+\section{Data Layer}
+
+\subsection{Assets}
+
+The equity and diversifier universe spans growth, financials, energy,
+defensives, and cross-asset hedging proxies:
+
+\begin{itemize}[leftmargin=1.5em]
+\item Mega-cap technology: AAPL, MSFT, GOOGL, AMZN, META, NVDA
+\item Financials and energy: JPM, GS, XOM, CVX
+\item Defensives and staples: JNJ, PG, KO, PEP, WMT
+\item Diversifiers: GLD, TLT, XLU, VNQ
+\item Benchmark: SPY
+\end{itemize}
+
+\subsection{Sources}
+
+The pipeline supports several data channels:
+
+\begin{itemize}[leftmargin=1.5em]
+\item \textbf{Prices and volumes}: \texttt{yfinance}
+\item \textbf{Macro, preferred}: FRED when \texttt{FRED\_API\_KEY} is present
+\item \textbf{Macro, no-key fallback}: BLS plus U.S. Treasury Fiscal Data
+\item \textbf{Fundamentals}: SEC company facts when \texttt{SEC\_USER\_AGENT} is set
+\end{itemize}
+
+This setup intentionally supports both a zero-cost mode and a richer research
+mode with additional macro and filing-based information.
+
+\subsection{Macro Regime Features}
+
+When available, the macro sleeve includes:
+
+\begin{itemize}[leftmargin=1.5em]
+\item 10-year Treasury yield
+\item 2-year Treasury yield
+\item Federal funds rate
+\item unemployment rate
+\item term spread
+\end{itemize}
+
+These features do not act as a stand-alone alpha engine. Instead, they inform a
+macro regime belief that is blended with the HMM market-regime estimate.
+
+\section{Alpha Layer}
+
+\subsection{Cross-Sectional Factor Composite}
+
+The factor model forms a composite score from four standard sleeves:
+
+\begin{itemize}[leftmargin=1.5em]
+\item momentum,
+\item value proxy,
+\item quality proxy,
+\item low volatility.
+\end{itemize}
+
+If $m_i, v_i, q_i, \ell_i$ denote z-scored factor values for asset $i$, the
+composite factor score is
+
+\[
+f_i = 0.30 m_i + 0.25 v_i + 0.25 q_i + 0.20 \ell_i.
+\]
+
+The quality term uses return-stability information and, when available, a simple
+SEC-based quality score blended into the cross-section.
+
+\subsection{Pairs Trading}
+
+Pairs trading follows the classical Engle-Granger idea:
+
+\begin{enumerate}[leftmargin=1.5em]
+\item test candidate pairs for cointegration,
+\item estimate a hedge ratio via OLS,
+\item compute the spread,
+\item trade deviations from the equilibrium spread.
+\end{enumerate}
+
+For a pair $(P^{(1)}_t, P^{(2)}_t)$ with hedge ratio $\beta$, the spread is
+
+\[
+s_t = P^{(1)}_t - \beta P^{(2)}_t.
+\]
+
+Its z-score is
+
+\[
+z_t = \frac{s_t - \mu_s}{\sigma_s + \varepsilon}.
+\]
+
+Large positive z-scores imply short-spread trades, while large negative z-scores
+imply long-spread trades.
+
+\subsection{Volatility Forecasting}
+
+Each name receives a GARCH(1,1) volatility forecast of the form
+
+\[
+\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2.
+\]
+
+These forecasts serve two roles:
+
+\begin{itemize}[leftmargin=1.5em]
+\item they provide a confidence scaling for signal sizing,
+\item they help the control layer understand when apparent alpha should be
+discounted because the environment is too volatile.
+\end{itemize}
+
+\subsection{Regime Detection}
+
+The market regime sleeve uses a simple two-state HMM on market returns. The
+states correspond loosely to bullish and bearish regimes. The HMM belief is then
+blended with a macro regime signal:
+
+\[
+\text{RegimeBelief}_t = 0.75 \cdot \text{HMMBelief}_t + 0.25 \cdot \text{MacroBelief}_t.
+\]
+
+This blended belief is later used to adjust both signal strength and RL state.
+
+\subsection{LSTM Sleeve}
+
+A lightweight recurrent model is trained on rolling windows of engineered return
+features, including short-horizon momentum, rolling volatility, and normalized
+returns. The purpose is not to create a heavy deep-learning stack, but to add a
+nonlinear, time-series-aware signal sleeve that can be adaptively up- or
+down-weighted.
+
+\subsection{Adaptive Signal Combination}
+
+Let $s^{(k)}_{i,t}$ denote the score for asset $i$ from source $k$. The combiner
+forms
+
+\[
+\alpha_{i,t} = \sum_k w^{(k)}_t s^{(k)}_{i,t},
+\]
+
+where the source weights $w^{(k)}_t$ are adjusted using recent realized signal
+quality. In the implementation, realized skill is proxied by recent Spearman
+information coefficients between source scores and realized returns. This makes
+the alpha stack adaptive rather than statically weighted.
+
+\section{Reinforcement Learning Layer}
+
+\subsection{Why RL is Used Here}
+
+The project uses RL where sequential control is natural:
+
+\begin{itemize}[leftmargin=1.5em]
+\item deciding how much capital to allocate,
+\item deciding when to hedge more aggressively,
+\item deciding how to split execution in the stand-alone demo.
+\end{itemize}
+
+This is a more defensible use of RL than asking it to learn stock-selection
+alpha directly from scratch in a small-data setting.
+
+\subsection{Portfolio Construction RL}
+
+The portfolio RL state is based on:
+
+\begin{itemize}[leftmargin=1.5em]
+\item cross-sectional alpha opportunity,
+\item current realized portfolio volatility,
+\item regime belief.
+\end{itemize}
+
+Actions choose an exposure bucket and an active-overlay size. The current
+implementation uses a factor-anchored target book:
+
+\[
+w^{\text{target}}_t = 0.90 \, w^{\text{factor}}_t + 0.10 \, w^{\text{stabilizer}}_t,
+\]
+
+where the stabilizer is a long-only minimum-variance style portfolio estimated
+from a Ledoit-Wolf shrinkage covariance matrix.
+
+If the RL action implies invested fraction $b_t$ and overlay fraction $\tau_t$,
+the final invested weights are approximately
+
+\[
+w_t = b_t \left[(1-\tau_t) w^{\text{target}}_t + \tau_t w^{\text{satellite}}_t\right].
+\]
+
+The satellite sleeve is not an entirely independent portfolio. It tilts the
+factor target toward the strongest alpha names, which keeps the strategy close to
+the factor book while still allowing active expression.
+
+\subsection{No-Trade Band}
+
+Small reallocations are suppressed by a rebalance band. If the implied turnover
+is too small, the system keeps the previous portfolio. If only some positions are
+inside the deadband, those positions remain unchanged and the rest of the book is
+rescaled to preserve the target capital budget. This is meant to reduce turnover
+drag without silently changing total exposure.
+
+\subsection{Hedging RL}
+
+The hedging agent uses state variables based on:
+
+\begin{itemize}[leftmargin=1.5em]
+\item current drawdown,
+\item volatility regime percentile,
+\item recent momentum.
+\end{itemize}
+
+It selects one of a small number of hedge ratios. The hedge sleeve is modeled as
+a convex, options-like protection layer:
+
+\[
+r^{\text{total}}_t =
+r^{\text{risky}}_t (1 - \phi h_t) +
+r^{\text{cash}}_t +
+r^{\text{hedge}}_t,
+\]
+
+where $h_t$ is the hedge intensity, $\phi$ discounts the risky sleeve under
+protection, and the hedge sleeve includes both a carry cost and a convex bonus in
+stress.
+
+\subsection{Execution RL}
+
+The execution component is a separate demonstration rather than the main driver
+of backtest results. It learns how to split a large order over a stylized trading
+day to reduce market impact relative to naive or schedule-based execution.
+
+\section{Backtesting Protocol}
+
+The backtest is walk-forward:
+
+\begin{itemize}[leftmargin=1.5em]
+\item historical prices and volumes are loaded,
+\item the sample is split into a training half and a test half,
+\item LSTM sleeves are trained on the initial window,
+\item the pipeline then steps forward day by day through the test period.
+\end{itemize}
+
+At each step, the system:
+
+\begin{enumerate}[leftmargin=1.5em]
+\item computes factor, pairs, GARCH, HMM, macro, and LSTM features,
+\item combines them into expected returns and confidence scores,
+\item lets RL choose exposure and hedge actions,
+\item applies transaction costs and cash carry,
+\item updates RL values from realized outcomes.
+\end{enumerate}
+
+\section{Evaluation Metrics}
+
+The reporting suite includes:
+
+\begin{itemize}[leftmargin=1.5em]
+\item annualized return,
+\item annualized volatility,
+\item Sharpe ratio,
+\item Sortino ratio,
+\item maximum drawdown,
+\item Calmar ratio,
+\item return distribution diagnostics including daily VaR.
+\end{itemize}
+
+For example, the annualized Sharpe ratio is computed as
+
+\[
+\text{Sharpe} =
+\frac{\mu_{\text{ann}} - r_f}{\sigma_{\text{ann}} + \varepsilon}.
+\]
+
+Similarly, the Calmar ratio is
+
+\[
+\text{Calmar} =
+\frac{\mu_{\text{ann}}}{|\text{MaxDrawdown}| + \varepsilon}.
+\]
+
+\section{Current Empirical Read}
+
+On the latest strong run reflected in the generated figures dated March 23, 2026,
+the full pipeline delivered approximately:
+
+\begin{itemize}[leftmargin=1.5em]
+\item annualized return: 32.0\%,
+\item annualized volatility: 12.9\%,
+\item Sharpe ratio: 2.21,
+\item maximum drawdown: -11.7\%,
+\item Calmar ratio: 2.72.
+\end{itemize}
+
+Against the same window, the factor-only benchmark achieved slightly higher raw
+return but with higher volatility and a materially deeper drawdown. This is the
+intended shape of the system: keep the pipeline close to the factor engine in
+good markets while using RL to moderate exposure and protect downside.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{stock_trading/pipeline_performance.png}
+\caption{Performance comparison for the full pipeline and benchmarks.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{stock_trading/pipeline_rl_analysis.png}
+\caption{Behavioral diagnostics for the portfolio and hedging RL layers.}
+\end{figure}
+
+\section{Limitations}
+
+The project remains research code with several important caveats:
+
+\begin{itemize}[leftmargin=1.5em]
+\item Macro data is not yet modeled with full vintage-awareness, so revised data
+can still make the backtest more optimistic than a live system.
+\item SEC-based quality signals are simple cross-sectional enrichments, not a full
+point-in-time fundamentals pipeline.
+\item Transaction-cost modeling is stylized and does not account for full
+microstructure realism.
+\item The hedge sleeve approximates convex protection but does not yet use live
+options-chain data or implied volatility surfaces.
+\item The test period is still only one realized market path, so robustness should
+be checked with subperiod analysis, parameter sweeps, and stress testing.
+\end{itemize}
+
+\section{Conclusion}
+
+The main contribution of this project is not any single model family in
+isolation. Rather, it is the integration of several financially motivated sleeves
+into a coherent decision pipeline where reinforcement learning is used as a
+control layer instead of as a replacement for domain structure.
+
+The modular code organization now mirrors that conceptual architecture. This
+makes the system easier to maintain, easier to explain, and easier to extend
+toward more realistic data, better point-in-time fundamentals, and richer
+execution and hedging models.
+
+\appendix
+
+\section{Implementation Snapshot}
+
+\subsection{Universe and Benchmark}
+
+\begin{center}
+\begin{tabular}{>{\bfseries}m{0.22\textwidth} m{0.68\textwidth}}
+\toprule
+Bucket & Assets \\
+\midrule
+Growth & AAPL, MSFT, GOOGL, AMZN, META, NVDA \\
+Financials / Energy & JPM, GS, XOM, CVX \\
+Defensives & JNJ, PG, KO, PEP, WMT \\
+Diversifiers & GLD, TLT, XLU, VNQ \\
+Benchmark & SPY \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Current RL Control Ladders}
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Portfolio action & Invested fraction & Active overlay fraction \\
+\midrule
+State 0 & 82\% & 5\% \\
+State 1 & 90\% & 8\% \\
+State 2 & 95\% & 12\% \\
+State 3 & 98\% & 16\% \\
+State 4 & 100\% & 20\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Hedge action & Hedge ratio \\
+\midrule
+State 0 & 0\% \\
+State 1 & 3\% \\
+State 2 & 8\% \\
+State 3 & 15\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
