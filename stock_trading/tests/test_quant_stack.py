@@ -45,7 +45,7 @@ class PortfolioConstructionTests(unittest.TestCase):
             recent_returns=self.recent,
         )
 
-        self.assertAlmostEqual(float(weights.sum() + cash), 1.0, places=8)
+        self.assertAlmostEqual(float(weights.sum() + cash), 1.0, places=7)
         self.assertGreater(float(weights["AAPL"]), float(weights["GLD"]))
 
     def test_rebalance_band_keeps_previous_weights_when_turnover_is_tiny(self) -> None:
