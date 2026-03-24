@@ -1,0 +1,36 @@
+\begin{table}[H]
+\centering
+\caption{Ablation summary across train/test split settings.}
+\label{tab:ablation_summary}
+\begin{tabular}{@{} l r r r r r @{}}
+\toprule
+Component & Mean Return & Mean Vol. & Mean Sharpe & Mean Max DD & Mean Calmar \\
+\midrule
+Factor Only & 22.5\% & 12.1\% & 1.57 & $-14.1\%$ & 1.60 \\
+Alpha Stack No RL & 18.7\% & 13.0\% & 1.18 & $-14.6\%$ & 1.28 \\
+Alpha + Portfolio RL & 15.4\% & 12.0\% & 0.99 & $-14.5\%$ & 1.06 \\
+Alpha + Hedge RL & 19.8\% & 11.9\% & 1.37 & $-12.0\%$ & 1.64 \\
+Full Pipeline & 17.0\% & 11.3\% & 1.20 & $-11.6\%$ & 1.47 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Rolling-window robustness summary for the full pipeline.}
+\label{tab:robustness_summary}
+\begin{tabular}{@{} l r @{}}
+\toprule
+Statistic & Value \\
+\midrule
+Rolling windows & 2 \\
+Median full-pipeline Sharpe & 1.65 \\
+Median full-pipeline Calmar & 3.26 \\
+Median full-pipeline Max DD & $-6.8\%$ \\
+Frac. windows full beats factor on drawdown & 100\% \\
+Frac. windows full beats factor on Calmar & 0\% \\
+Frac. windows full beats SPY on Sharpe & 100\% \\
+Frac. windows full beats SPY on Calmar & 100\% \\
+\bottomrule
+\end{tabular}
+\end{table}

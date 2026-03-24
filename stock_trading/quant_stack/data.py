@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy import stats as sp_stats
 
 from .config import (
     BLS_SERIES,

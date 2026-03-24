@@ -424,10 +424,10 @@ class AlphaCombiner:
         self.base_weights = {'factor': 0.55, 'pairs': 0.25, 'lstm': 0.20}
         self.source_skill = {source: 0.0 for source in self.base_weights}
 
-    def get_source_weights(self):
+    def get_source_weights(self, adaptive=True):
         raw = {}
         for source, base_weight in self.base_weights.items():
-            skill_scale = np.clip(1.0 + 1.5 * self.source_skill[source], 0.25, 2.0)
+            skill_scale = np.clip(1.0 + 1.5 * self.source_skill[source], 0.25, 2.0) if adaptive else 1.0
             raw[source] = base_weight * skill_scale
         total = sum(raw.values()) + 1e-8
         return {source: weight / total for source, weight in raw.items()}
@@ -449,8 +449,19 @@ class AlphaCombiner:
             ic = float(np.clip(ic, -0.5, 0.5))
             self.source_skill[source] = 0.85 * self.source_skill[source] + 0.15 * ic
 
-    def combine(self, factor_scores, pairs_signals, garch_vols,
-                regime_belief, lstm_preds, tickers):
+    def combine(
+        self,
+        factor_scores,
+        pairs_signals,
+        garch_vols,
+        regime_belief,
+        lstm_preds,
+        tickers,
+        use_factor=True,
+        use_pairs=True,
+        use_lstm=True,
+        adaptive=True,
+    ):
         """
         Weighted combination of all alpha sources.
         Returns: alpha score per ticker (z-score scale), confidence per ticker.
@@ -458,28 +469,28 @@ class AlphaCombiner:
         alpha = pd.Series(0.0, index=tickers)
         confidence = pd.Series(1.0, index=tickers)
         source_signals = {
-            'factor': factor_scores.reindex(tickers).fillna(0.0),
-            'pairs': pd.Series(pairs_signals, dtype=float).reindex(tickers).fillna(0.0),
-            'lstm': pd.Series(lstm_preds, dtype=float).reindex(tickers).fillna(0.0) * 100,
+            'factor': factor_scores.reindex(tickers).fillna(0.0) if use_factor else pd.Series(0.0, index=tickers),
+            'pairs': pd.Series(pairs_signals, dtype=float).reindex(tickers).fillna(0.0) if use_pairs else pd.Series(0.0, index=tickers),
+            'lstm': pd.Series(lstm_preds, dtype=float).reindex(tickers).fillna(0.0) * 100 if use_lstm else pd.Series(0.0, index=tickers),
         }
-        source_weights = self.get_source_weights()
+        source_weights = self.get_source_weights(adaptive=adaptive)
 
         for ticker in tickers:
             signals = []
             weights = []
 
             # Factor model — z-score directly as alpha
-            if ticker in factor_scores.index:
+            if use_factor and ticker in factor_scores.index:
                 signals.append(source_signals['factor'][ticker])
                 weights.append(source_weights['factor'])
 
             # Pairs signal — already directional (-1, 0, +1 scale)
-            if ticker in pairs_signals:
+            if use_pairs and ticker in pairs_signals:
                 signals.append(source_signals['pairs'][ticker])
                 weights.append(source_weights['pairs'])
 
             # LSTM — rescale small return prediction to z-score scale
-            if ticker in lstm_preds:
+            if use_lstm and ticker in lstm_preds:
                 signals.append(source_signals['lstm'][ticker])  # e.g. 0.003 → 0.3
                 weights.append(source_weights['lstm'])
 
@@ -515,4 +526,3 @@ def compute_alpha_opportunity(alpha_scores, confidence, top_k=3):
     top_bucket = effective_alpha.nlargest(k).mean()
     bottom_bucket = effective_alpha.nsmallest(k).mean()
     return float(top_bucket - bottom_bucket)
-

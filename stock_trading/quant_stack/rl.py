@@ -7,7 +7,10 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
+
+from .config import OptimizerConfig, TICKER_TO_GROUP
 
 class PortfolioConstructionRL:
     """
@@ -28,6 +31,7 @@ class PortfolioConstructionRL:
         epsilon: float = 0.15,
         rebalance_band: float = 0.015,
         min_turnover: float = 0.08,
+        optimizer_config: OptimizerConfig | None = None,
     ) -> None:
         self.n_risk_levels = n_risk_levels
         self.alpha = alpha
@@ -35,6 +39,7 @@ class PortfolioConstructionRL:
         self.epsilon = epsilon
         self.rebalance_band = rebalance_band
         self.min_turnover = min_turnover
+        self.optimizer_config = optimizer_config or OptimizerConfig()
         self.Q = defaultdict(lambda: np.zeros(n_risk_levels))
         self.reward_buffer = deque(maxlen=60)
 
@@ -158,6 +163,100 @@ class PortfolioConstructionRL:
         anchored = 0.90 * factor_book + 0.10 * stabilizer
         return anchored / (anchored.sum() + 1e-8)
 
+    def optimize_target_book(
+        self,
+        factor_scores: pd.Series,
+        alpha_scores: pd.Series,
+        confidence: pd.Series,
+        recent_returns: pd.DataFrame | None,
+        prev_weights: pd.Series | None = None,
+    ) -> pd.Series:
+        """
+        Constrained allocator between the alpha layer and RL.
+        It converts expected-return information into a capped, long-only target
+        book with anchor, risk, turnover, and group-concentration controls.
+        """
+        base_target = self.build_factor_target(factor_scores, confidence, recent_returns)
+        config = self.optimizer_config
+        tickers = factor_scores.index
+        n_assets = len(tickers)
+        effective_max_weight = max(config.max_weight, 1.0 / max(1, n_assets))
+
+        if not config.use_optimizer or n_assets == 0:
+            return base_target
+
+        if recent_returns is None or len(recent_returns) < 40:
+            return base_target
+
+        aligned_returns = recent_returns.reindex(columns=tickers).fillna(0.0)
+        if aligned_returns.shape[1] < 2:
+            return base_target
+
+        alpha_view = (alpha_scores * confidence).reindex(tickers).fillna(0.0)
+        if alpha_view.std() > 1e-8:
+            alpha_view = (alpha_view - alpha_view.mean()) / alpha_view.std()
+        else:
+            alpha_view = alpha_view * 0.0
+
+        prev_book = None
+        if prev_weights is not None and len(prev_weights) > 0 and float(prev_weights.sum()) > 1e-8:
+            prev_book = prev_weights.reindex(tickers).fillna(0.0)
+            prev_book = prev_book / (prev_book.sum() + 1e-8)
+
+        try:
+            cov = LedoitWolf().fit(aligned_returns.values).covariance_
+        except Exception:
+            return base_target
+
+        bounds = [(0.0, effective_max_weight) for _ in tickers]
+        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
+
+        for group, cap in config.group_caps.items():
+            indices = [i for i, ticker in enumerate(tickers) if TICKER_TO_GROUP.get(ticker) == group]
+            if indices:
+                constraints.append({
+                    'type': 'ineq',
+                    'fun': lambda w, idx=indices, group_cap=cap: group_cap - np.sum(w[idx]),
+                })
+
+        x0 = np.clip(base_target.values, 0.0, effective_max_weight)
+        x0 = x0 / (x0.sum() + 1e-8)
+
+        def objective(weights: np.ndarray) -> float:
+            risk_term = config.risk_aversion * float(weights @ cov @ weights)
+            alpha_term = -config.alpha_strength * float(alpha_view.values @ weights)
+            anchor_term = config.anchor_strength * float(np.sum((weights - base_target.values) ** 2))
+            turnover_term = 0.0
+            if prev_book is not None:
+                turnover_term = config.turnover_penalty * float(np.sum((weights - prev_book.values) ** 2))
+            return risk_term + alpha_term + anchor_term + turnover_term
+
+        try:
+            result = minimize(objective, x0=x0, method='SLSQP', bounds=bounds, constraints=constraints)
+            if not result.success:
+                return base_target
+            optimized = np.clip(result.x, 0.0, effective_max_weight)
+            optimized = optimized / (optimized.sum() + 1e-8)
+            return pd.Series(optimized, index=tickers)
+        except Exception:
+            return base_target
+
+    @staticmethod
+    def _enforce_absolute_weight_cap(weights: pd.Series, max_weight: float) -> pd.Series:
+        adjusted = weights.copy()
+        for _ in range(10):
+            excess_mask = adjusted > max_weight + 1e-8
+            if not excess_mask.any():
+                break
+            excess = float((adjusted[excess_mask] - max_weight).sum())
+            adjusted[excess_mask] = max_weight
+            room_mask = adjusted < max_weight - 1e-8
+            if not room_mask.any() or excess <= 1e-10:
+                break
+            room = max_weight - adjusted[room_mask]
+            adjusted.loc[room_mask] += excess * room / (room.sum() + 1e-8)
+        return adjusted
+
     def construct_portfolio(
         self,
         factor_scores: pd.Series,
@@ -165,6 +264,7 @@ class PortfolioConstructionRL:
         confidence: pd.Series,
         action: int,
         recent_returns: pd.DataFrame | None = None,
+        prev_weights: pd.Series | None = None,
     ) -> tuple[pd.Series, float]:
         """
         Build a factor-anchored portfolio.
@@ -175,10 +275,12 @@ class PortfolioConstructionRL:
         tilt_frac = self.tilt_fractions[action]
 
         weighted_alpha = (alpha_scores * confidence).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        factor_target = self.build_factor_target(
+        optimized_target = self.optimize_target_book(
             factor_scores.reindex(weighted_alpha.index).fillna(0.0),
+            alpha_scores.reindex(weighted_alpha.index).fillna(0.0),
             confidence,
             recent_returns,
+            prev_weights=prev_weights,
         )
         n_assets = len(weighted_alpha)
 
@@ -194,16 +296,18 @@ class PortfolioConstructionRL:
             positive_alpha = positive_alpha.where(positive_alpha.index.isin(keep), 0.0)
 
         if positive_alpha.sum() < 1e-8:
-            satellite_weights = factor_target.copy()
+            satellite_weights = optimized_target.copy()
         else:
             alpha_scale = positive_alpha / (positive_alpha.max() + 1e-8)
-            tilted_target = factor_target * (1.0 + alpha_scale)
+            tilted_target = optimized_target * (1.0 + alpha_scale)
             satellite_weights = tilted_target / (tilted_target.sum() + 1e-8)
         core_budget = invest_frac * (1.0 - tilt_frac)
         satellite_budget = invest_frac * tilt_frac
-        core_weights = factor_target * core_budget
+        core_weights = optimized_target * core_budget
 
         weights = core_weights + satellite_weights * satellite_budget
+        effective_cap = max(self.optimizer_config.max_weight, invest_frac / max(1, n_assets))
+        weights = self._enforce_absolute_weight_cap(weights, effective_cap)
         cash_weight = max(0.0, 1.0 - invest_frac)
 
         return weights, cash_weight
@@ -321,7 +425,13 @@ class DynamicHedgingRL:
     State: (portfolio drawdown, vol regime, momentum regime)
     Action: hedge ratio (0%, 3%, 8%, 15%)
     """
-    def __init__(self, alpha: float = 0.03, gamma: float = 0.95, epsilon: float = 0.15) -> None:
+    def __init__(
+        self,
+        alpha: float = 0.03,
+        gamma: float = 0.95,
+        epsilon: float = 0.15,
+        hedge_ratios: Sequence[float] | None = None,
+    ) -> None:
         self.n_actions = 4
         self.alpha = alpha
         self.gamma = gamma
@@ -329,7 +439,7 @@ class DynamicHedgingRL:
         self.Q = defaultdict(lambda: np.zeros(self.n_actions))
         # Keep the hedge sleeve light so it protects in stress without
         # dominating performance in normal markets.
-        self.hedge_ratios = [0.0, 0.03, 0.08, 0.15]
+        self.hedge_ratios = list(hedge_ratios or (0.0, 0.03, 0.08, 0.15))
         self.portfolio_peak = 1.0
         self.reward_buffer = deque(maxlen=60)
 
@@ -365,6 +475,8 @@ class DynamicHedgingRL:
         market_ret: float,
         hedge_ratio: float,
         vol_percentile: float,
+        drawdown: float = 0.0,
+        momentum: float = 0.0,
     ) -> tuple[float, float]:
         """
         Protective sleeve:
@@ -372,9 +484,11 @@ class DynamicHedgingRL:
         - a convex bonus helps in sharper selloffs
         - carry cost bleeds slowly in calm periods
         """
-        stress_gate = float((vol_percentile > 0.75) or (market_ret < -0.012))
-        effective_hedge = hedge_ratio * (0.35 + 0.65 * stress_gate)
-        protected_risky_ret = risky_ret * (1 - 0.5 * effective_hedge)
+        stress_gate = float((vol_percentile > 0.75) or (market_ret < -0.012) or (drawdown < -0.06))
+        crash_overlay = np.clip(max(-drawdown - 0.06, 0.0) * 0.5 + max(-momentum - 0.02, 0.0) * 1.2, 0.0, 0.10)
+        effective_hedge = min(0.35, hedge_ratio * (0.40 + 0.60 * stress_gate) + crash_overlay)
+        vol_target_scale = np.clip(1.05 - 0.45 * max(vol_percentile - 0.55, 0.0), 0.65, 1.0)
+        protected_risky_ret = risky_ret * (1 - 0.45 * effective_hedge) * vol_target_scale
         carry_cost = effective_hedge * 0.00012
         convexity_bonus = max(-market_ret - 0.015, 0.0) * effective_hedge * (1.0 + 0.35 * vol_percentile)
         hedge_pnl = (-effective_hedge * market_ret) + convexity_bonus - carry_cost
@@ -391,4 +505,3 @@ class DynamicHedgingRL:
         best_next = np.max(self.Q[next_state])
         td = reward + self.gamma * best_next - self.Q[state][action]
         self.Q[state][action] += self.alpha * td
-
