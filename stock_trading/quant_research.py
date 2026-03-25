@@ -34,6 +34,8 @@ def main() -> None:
     print("  - research_robustness_summary.csv")
     print("  - research_regime_summary.csv")
     print("  - research_rolling_references.csv")
+    print("  - research_bootstrap_cis.csv")
+    print("  - research_bootstrap_significance.csv")
     print("  - research_summary.json")
     print("  - research_paper_tables.tex")
     print("  - pipeline_research_eval.png")

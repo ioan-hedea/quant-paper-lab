@@ -53,14 +53,16 @@ class PortfolioConstructionRL:
         alpha_opportunity: float,
         portfolio_vol: float,
         regime_belief: float,
-    ) -> tuple[int, int, int]:
+        uncertainty_score: float = 0.0,
+    ) -> tuple[int, int, int, int]:
         """Discretize continuous state."""
         alpha_bin = int(np.clip(np.digitize(alpha_opportunity,
                         [0.25, 0.60, 1.00, 1.50]), 0, 4))
         vol_bin = int(np.clip(np.digitize(portfolio_vol,
                       [0.008, 0.012, 0.016, 0.022]), 0, 4))
         regime_bin = int(regime_belief > 0.5)
-        return (alpha_bin, vol_bin, regime_bin)
+        uncertainty_bin = int(np.clip(np.digitize(uncertainty_score, [0.20, 0.35, 0.55, 0.75]), 0, 4))
+        return (alpha_bin, vol_bin, regime_bin, uncertainty_bin)
 
     def select_action(self, state: tuple[int, int, int]) -> int:
         if np.random.random() < self.epsilon:
@@ -454,19 +456,35 @@ class DynamicHedgingRL:
             return np.random.randint(self.n_actions)
         return int(np.argmax(self.Q[state]))
 
-    def compute_reward(self, portfolio_return: float, hedge_ratio: float) -> float:
+    def compute_reward(
+        self,
+        portfolio_return: float,
+        hedge_ratio: float,
+        mode: str = 'asymmetric_return',
+    ) -> float:
         """
         Reward = realized return. The agent learns that hedging
         costs returns in bull markets but saves money in crashes.
         Simple and clean — let RL figure out the tradeoff.
         """
         self.reward_buffer.append(portfolio_return)
+        reward_mode = str(mode or 'asymmetric_return').lower()
 
-        # Asymmetric reward: losses hurt 2x more than gains help
+        if reward_mode == 'return':
+            return portfolio_return * 100
+
+        if reward_mode == 'sortino':
+            rets = np.array(self.reward_buffer, dtype=float)
+            if len(rets) < 6:
+                return portfolio_return * 100
+            downside = rets[rets < 0]
+            downside_std = float(downside.std()) if len(downside) > 0 else 1e-8
+            return float((portfolio_return - rets.mean()) / (downside_std + 1e-8))
+
+        # Default: asymmetric return reward (losses penalized harder).
         if portfolio_return >= 0:
             return portfolio_return * 100
-        else:
-            return portfolio_return * 200  # double penalty for losses
+        return portfolio_return * 200
 
     def apply_hedge(
         self,
@@ -505,3 +523,288 @@ class DynamicHedgingRL:
         best_next = np.max(self.Q[next_state])
         td = reward + self.gamma * best_next - self.Q[state][action]
         self.Q[state][action] += self.alpha * td
+
+
+# ============================================================
+# End-to-End RL Baseline (PPO via Stable-Baselines3)
+# ============================================================
+
+import gymnasium as gym
+from gymnasium import spaces
+
+
+class EndToEndTradingEnv(gym.Env):
+    """
+    Gymnasium environment for end-to-end RL portfolio management.
+
+    The agent directly outputs portfolio weights from raw features,
+    without the modular alpha/RL separation of the main pipeline.
+
+    State: factor scores, vol forecasts, regime belief, macro signal,
+           recent returns, current drawdown, portfolio vol
+    Action: continuous portfolio weights (softmax-normalized)
+    Reward: differential Sharpe ratio (same as pipeline RL)
+    """
+
+    metadata = {'render_modes': []}
+
+    def __init__(
+        self,
+        returns: pd.DataFrame,
+        tickers: list[str],
+        feature_fn: callable,
+        start_idx: int,
+        end_idx: int,
+        cost_bps: float = 5.0,
+        risk_free_rate: float = 0.035,
+        reward_mode: str = 'differential_sharpe',
+    ):
+        super().__init__()
+        self.returns = returns
+        self.tickers = tickers
+        self.feature_fn = feature_fn
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+        self.cost_bps = cost_bps
+        self.risk_free_rate = risk_free_rate
+        self.reward_mode = reward_mode
+
+        self.n_assets = len(tickers)
+        # Observation: per-asset features + global features
+        n_features = feature_fn(start_idx).shape[0]
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32,
+        )
+        # Action: raw logits for each asset (softmax applied internally)
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(self.n_assets,), dtype=np.float32,
+        )
+
+        self._t = start_idx
+        self._wealth = 1.0
+        self._peak = 1.0
+        self._prev_weights = np.ones(self.n_assets) / self.n_assets
+        self._recent_returns = deque(maxlen=60)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self._t = self.start_idx
+        self._wealth = 1.0
+        self._peak = 1.0
+        self._prev_weights = np.ones(self.n_assets) / self.n_assets
+        self._recent_returns.clear()
+        obs = self.feature_fn(self._t)
+        return obs.astype(np.float32), {}
+
+    def step(self, action):
+        # Convert action to portfolio weights via softmax
+        action = np.asarray(action, dtype=np.float64)
+        exp_a = np.exp(action - action.max())
+        weights = exp_a / (exp_a.sum() + 1e-8)
+
+        # Daily return
+        daily_ret = self.returns[self.tickers].iloc[self._t].values
+        portfolio_ret = float(np.dot(weights, daily_ret))
+
+        # Transaction costs
+        turnover = float(np.abs(weights - self._prev_weights).sum())
+        tx_cost = turnover * self.cost_bps / 10000
+        portfolio_ret -= tx_cost
+
+        self._wealth *= (1 + portfolio_ret)
+        self._peak = max(self._peak, self._wealth)
+        self._recent_returns.append(portfolio_ret)
+        self._prev_weights = weights.copy()
+
+        # Reward-function ablation support
+        reward_mode = str(self.reward_mode or 'differential_sharpe').lower()
+        if reward_mode == 'return':
+            reward = float(portfolio_ret * 100)
+        elif reward_mode == 'sortino':
+            if len(self._recent_returns) > 5:
+                rets_arr = np.array(self._recent_returns)
+                downside = rets_arr[rets_arr < 0]
+                downside_std = float(downside.std()) if len(downside) > 0 else 1e-8
+                reward = float((portfolio_ret - rets_arr.mean()) / (downside_std + 1e-8))
+            else:
+                reward = float(portfolio_ret * 100)
+        else:
+            if len(self._recent_returns) > 5:
+                rets_arr = np.array(self._recent_returns)
+                reward = float((portfolio_ret - rets_arr.mean()) / (rets_arr.std() + 1e-8))
+            else:
+                reward = float(portfolio_ret * 100)
+
+        self._t += 1
+        terminated = self._t >= self.end_idx
+        truncated = False
+
+        obs = self.feature_fn(min(self._t, self.end_idx - 1)).astype(np.float32)
+        info = {'wealth': self._wealth, 'portfolio_ret': portfolio_ret}
+
+        return obs, reward, terminated, truncated, info
+
+
+def build_e2e_features(
+    returns: pd.DataFrame,
+    tickers: list[str],
+    factor_scores_fn: callable,
+    garch_vols_fn: callable,
+    regime_belief_fn: callable,
+    macro_belief_fn: callable,
+) -> callable:
+    """
+    Build a feature function for the end-to-end environment.
+
+    Returns the same features the modular pipeline uses, so the
+    comparison is fair (same information set).
+    """
+    n_assets = len(tickers)
+    n_obs = len(returns)
+
+    factor_cache: dict[int, np.ndarray] = {}
+    garch_cache: dict[int, np.ndarray] = {}
+
+    def _factor_scores(t: int) -> np.ndarray:
+        t_idx = int(np.clip(t, 0, n_obs - 1))
+        if t_idx not in factor_cache:
+            factor_cache[t_idx] = np.asarray(factor_scores_fn(t_idx), dtype=float)
+        return factor_cache[t_idx]
+
+    def _garch_vols(t: int) -> np.ndarray:
+        t_idx = int(np.clip(t, 0, n_obs - 1))
+        if t_idx not in garch_cache:
+            garch_cache[t_idx] = np.asarray(garch_vols_fn(t_idx), dtype=float)
+        return garch_cache[t_idx]
+
+    # Precompute a simple cross-sectional IC-instability proxy.
+    ic_proxy = np.zeros(n_obs, dtype=float)
+    for t in range(1, n_obs):
+        fs_prev = _factor_scores(t - 1)
+        realized = returns[tickers].iloc[t].values
+        if fs_prev.std() < 1e-8 or realized.std() < 1e-8:
+            continue
+        corr = np.corrcoef(fs_prev, realized)[0, 1]
+        ic_proxy[t] = float(corr) if np.isfinite(corr) else 0.0
+    ic_instability = (
+        pd.Series(ic_proxy)
+        .rolling(20, min_periods=5)
+        .std()
+        .fillna(0.0)
+        .clip(lower=0.0, upper=1.0)
+        .values
+    )
+
+    def feature_fn(t: int) -> np.ndarray:
+        # Per-asset features
+        factor_scores = _factor_scores(t)  # (n_assets,)
+        garch_vols = _garch_vols(t)  # (n_assets,)
+
+        # Recent returns (5d, 20d)
+        ret_5d = returns[tickers].iloc[max(0, t - 5):t].mean().values
+        ret_20d = returns[tickers].iloc[max(0, t - 20):t].mean().values
+        vol_20d = returns[tickers].iloc[max(0, t - 20):t].std().values
+
+        # Global features
+        regime = regime_belief_fn(t)
+        macro = macro_belief_fn(t)
+        p = float(np.clip(regime, 1e-6, 1.0 - 1e-6))
+        regime_entropy = float(-(p * np.log(p) + (1.0 - p) * np.log(1.0 - p)) / np.log(2.0))
+        alpha_dispersion = float(np.tanh(np.std(factor_scores) / 2.0))
+        market_ret_20d = returns[tickers].iloc[max(0, t - 20):t].mean(axis=1).sum()
+        market_vol = returns[tickers].iloc[max(0, t - 60):t].mean(axis=1).std() * np.sqrt(252)
+
+        features = np.concatenate([
+            factor_scores,       # n_assets
+            garch_vols,          # n_assets
+            ret_5d,              # n_assets
+            ret_20d,             # n_assets
+            vol_20d,             # n_assets
+            np.array([
+                regime,
+                macro,
+                market_ret_20d,
+                market_vol,
+                alpha_dispersion,
+                regime_entropy,
+                float(ic_instability[int(np.clip(t, 0, n_obs - 1))]),
+            ]),  # 7 global
+        ])
+        return np.nan_to_num(features, nan=0.0, posinf=1.0, neginf=-1.0)
+
+    return feature_fn
+
+
+def run_e2e_baseline(
+    returns: pd.DataFrame,
+    tickers: list[str],
+    feature_fn: callable,
+    train_start: int,
+    train_end: int,
+    test_end: int,
+    cost_bps: float = 5.0,
+    risk_free_rate: float = 0.035,
+    reward_mode: str = 'differential_sharpe',
+    total_timesteps: int = 50_000,
+) -> dict[str, object]:
+    """
+    Train PPO on the training period and evaluate on the test period.
+
+    Returns wealth path and daily returns for the test period.
+    """
+    from stable_baselines3 import PPO
+
+    # Training environment
+    train_env = EndToEndTradingEnv(
+        returns=returns,
+        tickers=tickers,
+        feature_fn=feature_fn,
+        start_idx=train_start,
+        end_idx=train_end,
+        cost_bps=cost_bps,
+        risk_free_rate=risk_free_rate,
+        reward_mode=reward_mode,
+    )
+
+    # Train PPO
+    model = PPO(
+        'MlpPolicy',
+        train_env,
+        learning_rate=3e-4,
+        n_steps=min(256, train_end - train_start - 1),
+        batch_size=64,
+        n_epochs=10,
+        gamma=0.99,
+        verbose=0,
+    )
+    model.learn(total_timesteps=total_timesteps)
+
+    # Evaluate on test period
+    test_env = EndToEndTradingEnv(
+        returns=returns,
+        tickers=tickers,
+        feature_fn=feature_fn,
+        start_idx=train_end,
+        end_idx=test_end,
+        cost_bps=cost_bps,
+        risk_free_rate=risk_free_rate,
+        reward_mode=reward_mode,
+    )
+
+    obs, _ = test_env.reset()
+    wealth_path = [1.0]
+    daily_returns = []
+    done = False
+
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = test_env.step(action)
+        wealth_path.append(info['wealth'])
+        daily_returns.append(info['portfolio_ret'])
+        done = terminated or truncated
+
+    return {
+        'wealth': wealth_path,
+        'daily_returns': daily_returns,
+        'model': model,
+    }

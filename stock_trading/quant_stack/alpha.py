@@ -1,5 +1,7 @@
 """Alpha models and signal-combination components for the quant trading pipeline."""
 
+from collections import deque
+
 import numpy as np
 import pandas as pd
 from arch import arch_model
@@ -423,6 +425,7 @@ class AlphaCombiner:
         self.lookback = lookback
         self.base_weights = {'factor': 0.55, 'pairs': 0.25, 'lstm': 0.20}
         self.source_skill = {source: 0.0 for source in self.base_weights}
+        self.ic_history = {source: deque(maxlen=lookback) for source in self.base_weights}
 
     def get_source_weights(self, adaptive=True):
         raw = {}
@@ -447,7 +450,19 @@ class AlphaCombiner:
             if np.isnan(ic):
                 continue
             ic = float(np.clip(ic, -0.5, 0.5))
+            self.ic_history[source].append(ic)
             self.source_skill[source] = 0.85 * self.source_skill[source] + 0.15 * ic
+
+    def get_ic_instability(self) -> float:
+        """Average rolling IC volatility across alpha sleeves."""
+        instabilities: list[float] = []
+        for hist in self.ic_history.values():
+            if len(hist) < 5:
+                continue
+            instabilities.append(float(np.std(np.array(hist, dtype=float))))
+        if not instabilities:
+            return 0.0
+        return float(np.mean(instabilities))
 
     def combine(
         self,

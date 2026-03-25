@@ -154,6 +154,9 @@ def plot_performance(results):
     spy = np.array(results['spy'][1:])
     equal = np.array(results['equal'][1:])
     factor = np.array(results['factor'][1:])
+    voltarget = np.array(results.get('voltarget', results['factor'])[1:])
+    ddlever = np.array(results.get('ddlever', results['factor'])[1:])
+    e2e_rl = np.array(results.get('e2e_rl', results['factor'])[1:])
 
     # 1. Cumulative returns
     ax = axes[0, 0]
@@ -161,9 +164,13 @@ def plot_performance(results):
     ax.plot(dates, spy, color='black', linewidth=1.5, linestyle='--', label='SPY Buy & Hold')
     ax.plot(dates, equal, color='gray', linewidth=1, alpha=0.7, label='Equal Weight')
     ax.plot(dates, factor, color='#FF9800', linewidth=1, alpha=0.7, label='Factor-Only (no RL)')
+    ax.plot(dates, voltarget, color='#4CAF50', linewidth=1, alpha=0.7, linestyle='-.', label='Vol-Target')
+    ax.plot(dates, ddlever, color='#9C27B0', linewidth=1, alpha=0.7, linestyle=':', label='DD-Delever')
+    if len(e2e_rl) == len(dates):
+        ax.plot(dates, e2e_rl, color='#F44336', linewidth=1, alpha=0.7, linestyle='--', label='E2E RL (PPO)')
     ax.set_ylabel('Portfolio Value ($1 start)')
     ax.set_title('Cumulative Performance')
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=6, ncol=2)
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     ax.tick_params(axis='x', rotation=45)
@@ -226,9 +233,12 @@ def plot_performance(results):
         'SPY': spy_rets_arr,
         'Equal Weight': np.diff(results['equal']) / np.array(results['equal'][:-1]),
         'Factor Only': np.diff(results['factor']) / np.array(results['factor'][:-1]),
+        'Vol-Target': np.diff(results.get('voltarget', results['factor'])) / np.array(results.get('voltarget', results['factor'])[:-1]),
+        'DD-Delever': np.diff(results.get('ddlever', results['factor'])) / np.array(results.get('ddlever', results['factor'])[:-1]),
+        'E2E RL (PPO)': np.diff(results.get('e2e_rl', results['factor'])) / np.array(results.get('e2e_rl', results['factor'])[:-1]),
     }
-    colors = ['#2196F3', 'black', 'gray', '#FF9800']
-    markers = ['o', 's', 'D', '^']
+    colors = ['#2196F3', 'black', 'gray', '#FF9800', '#4CAF50', '#9C27B0', '#F44336']
+    markers = ['o', 's', 'D', '^', 'v', 'P', 'X']
 
     for (name, rets), color, marker in zip(strategies.items(), colors, markers):
         ann_ret = np.mean(rets) * 252
@@ -268,10 +278,10 @@ def plot_performance(results):
     table.set_fontsize(8)
     table.scale(1.1, 1.6)
 
-    row_colors = ['#E3F2FD', '#F5F5F5', '#EEEEEE', '#FFF3E0']
+    row_colors = ['#E3F2FD', '#F5F5F5', '#EEEEEE', '#FFF3E0', '#E8F5E9', '#F3E5F5', '#FFEBEE']
     for i in range(len(table_data)):
         for j in range(7):
-            table[i + 1, j].set_facecolor(row_colors[i])
+            table[i + 1, j].set_facecolor(row_colors[i % len(row_colors)])
 
     ax.set_title('Performance Metrics', fontsize=12, fontweight='bold', pad=20)
 

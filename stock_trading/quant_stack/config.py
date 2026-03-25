@@ -32,6 +32,9 @@ FRED_SERIES = {
     'rate_2y': 'DGS2',
     'fed_funds': 'FEDFUNDS',
     'unrate': 'UNRATE',
+    'vix': 'VIXCLS',
+    'hy_oas': 'BAMLH0A0HYM2',
+    'dxy': 'DTWEXBGS',
 }
 TREASURY_SECURITIES = {
     'treasury_bill_rate': 'Treasury Bills',
@@ -118,6 +121,9 @@ class PipelineConfig:
     rebalance_band: float = 0.015
     min_turnover: float = 0.08
     hedge_ratios: tuple[float, ...] = (0.0, 0.03, 0.08, 0.15)
+    portfolio_reward_mode: str = 'differential_sharpe'
+    hedge_reward_mode: str = 'asymmetric_return'
+    e2e_reward_mode: str = 'differential_sharpe'
     feature_availability: FeatureAvailabilityConfig = field(default_factory=FeatureAvailabilityConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
@@ -130,10 +136,15 @@ class EvaluationConfig:
 
     train_fracs: tuple[float, ...] = (0.4, 0.5, 0.6)
     rolling_train_frac: float = 0.5
-    rolling_window_days: int = 756
-    rolling_step_days: int = 252
-    max_rolling_windows: int = 3
+    rolling_window_days: int = 504
+    rolling_step_days: int = 126
+    min_rolling_windows: int = 4
+    max_rolling_windows: int = 6
     cost_bps_grid: tuple[float, ...] = (3.0, 5.0, 8.0, 12.0)
     rebalance_band_grid: tuple[float, ...] = (0.005, 0.015, 0.03)
     hedge_scale_grid: tuple[float, ...] = (0.75, 1.0, 1.25)
     macro_lag_grid: tuple[int, ...] = (1, 3, 5)
+    reward_mode_grid: tuple[str, ...] = ('differential_sharpe', 'return', 'sortino')
+    bootstrap_samples: int = 400
+    bootstrap_block_size: int = 20
+    bootstrap_seed: int = 7

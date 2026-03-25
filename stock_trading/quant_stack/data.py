@@ -338,20 +338,32 @@ def compute_macro_regime_signal(macro_window: pd.DataFrame) -> float:
     if macro_window.empty:
         return 0.5
 
-    components = []
-    if 'term_spread' in macro_window.columns and macro_window['term_spread'].notna().sum() > 20:
-        current = macro_window['term_spread'].iloc[-1]
-        hist = macro_window['term_spread'].dropna()
-        components.append(sp_stats.percentileofscore(hist, current) / 100)
-    if 'unrate' in macro_window.columns and macro_window['unrate'].notna().sum() > 20:
-        current = macro_window['unrate'].iloc[-1]
-        hist = macro_window['unrate'].dropna()
-        components.append(1 - sp_stats.percentileofscore(hist, current) / 100)
-    if 'fed_funds' in macro_window.columns and macro_window['fed_funds'].notna().sum() > 20:
-        current = macro_window['fed_funds'].iloc[-1]
-        hist = macro_window['fed_funds'].dropna()
-        components.append(1 - sp_stats.percentileofscore(hist, current) / 100)
+    weighted_components: list[tuple[float, float]] = []
 
-    if not components:
+    def _add_component(column: str, higher_is_better: bool, weight: float) -> None:
+        if column not in macro_window.columns or macro_window[column].notna().sum() <= 20:
+            return
+        hist = macro_window[column].dropna()
+        if hist.empty:
+            return
+        current = float(hist.iloc[-1])
+        pct = float(sp_stats.percentileofscore(hist, current) / 100.0)
+        score = pct if higher_is_better else (1.0 - pct)
+        weighted_components.append((score, weight))
+
+    # Core rates/labor structure
+    _add_component('term_spread', higher_is_better=True, weight=0.24)
+    _add_component('unrate', higher_is_better=False, weight=0.20)
+    _add_component('fed_funds', higher_is_better=False, weight=0.14)
+
+    # Credit/spread/volatility structure (added with extended FRED feature set)
+    _add_component('vix', higher_is_better=False, weight=0.20)
+    _add_component('hy_oas', higher_is_better=False, weight=0.16)
+    _add_component('dxy', higher_is_better=False, weight=0.06)
+
+    if not weighted_components:
         return 0.5
-    return float(np.clip(np.mean(components), 0.05, 0.95))
+    scores = np.array([item[0] for item in weighted_components], dtype=float)
+    weights = np.array([item[1] for item in weighted_components], dtype=float)
+    regime_score = float(np.average(scores, weights=weights))
+    return float(np.clip(regime_score, 0.05, 0.95))
