@@ -1,0 +1,9 @@
+numpy>=1.26,<3
+pandas>=2.2,<3
+scipy>=1.13,<2
+matplotlib>=3.8,<4
+yfinance>=0.2.54,<1
+scikit-learn>=1.4,<2
+statsmodels>=0.14,<1
+arch>=7,<8
+gymnasium>=0.29,<1.1

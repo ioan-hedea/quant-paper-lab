@@ -39,6 +39,12 @@ def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Dat
     volumes = volumes.loc[common_idx]
     returns = returns.loc[common_idx]
 
+    if common_idx.empty:
+        raise RuntimeError(
+            "No market data was downloaded from yfinance. "
+            "Check network access or the upstream data source and try again."
+        )
+
     macro_data = load_macro_data(common_idx)
     sec_quality_scores = load_sec_quality_scores([t for t in UNIVERSE if t in prices.columns])
 

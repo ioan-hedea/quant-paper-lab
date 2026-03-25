@@ -4,12 +4,35 @@ This folder contains a research-style quantitative trading pipeline that combine
 
 The code now lives in a small package under [`quant_stack`](quant_stack), while [`quant_pipeline.py`](quant_pipeline.py) remains a thin compatibility wrapper so the original run command still works.
 
+## Environment Setup
+
+Create a local virtual environment at the repo root and install the base
+dependencies for the pipeline:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r stock_trading/requirements.txt
+```
+
+If you also want the optional PPO end-to-end RL baseline, install the extra
+package set:
+
+```bash
+python -m pip install -r stock_trading/requirements-e2e.txt
+```
+
 ## Run
+
+The pipeline downloads market and macro data live at runtime, so network access
+is required when you execute it.
 
 Baseline run:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib uv run python stock_trading/quant_pipeline.py
+source .venv/bin/activate
+MPLCONFIGDIR=/tmp/matplotlib python stock_trading/quant_pipeline.py
 ```
 
 With optional macro and SEC enrichment:
@@ -18,13 +41,14 @@ With optional macro and SEC enrichment:
 FRED_API_KEY="your_key" \
 SEC_USER_AGENT="Your Name your_email@example.com" \
 MPLCONFIGDIR=/tmp/matplotlib \
-uv run python stock_trading/quant_pipeline.py
+python stock_trading/quant_pipeline.py
 ```
 
 Research evaluation run:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib uv run python stock_trading/quant_research.py
+source .venv/bin/activate
+MPLCONFIGDIR=/tmp/matplotlib python stock_trading/quant_research.py
 ```
 
 ## Output Files
