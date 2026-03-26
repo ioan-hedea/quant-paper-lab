@@ -265,6 +265,7 @@ class EvaluationTests(unittest.TestCase):
                     "experiment_label": config.experiment.label,
                     "turnover": [0.0],
                     "transaction_costs": [0.0],
+                    "live_agent": lambda: None,
                 }
 
             common_patches = (
