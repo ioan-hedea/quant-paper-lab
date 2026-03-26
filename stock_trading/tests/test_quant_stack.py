@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import pickle
 import unittest
+from unittest.mock import patch
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
 
-from stock_trading.quant_stack.data import _parse_bls_monthly_series, compute_macro_regime_signal
-from stock_trading.quant_stack.evaluation import build_ablation_suite
+from stock_trading.quant_stack.data import (
+    _parse_bls_monthly_series,
+    _sanitize_ohlcv_download,
+    compute_macro_regime_signal,
+)
+from stock_trading.quant_stack.evaluation import build_ablation_suite, run_research_evaluation
 from stock_trading.quant_stack.pipeline import _apply_macro_lag, _compute_transaction_cost
-from stock_trading.quant_stack.config import PipelineConfig
+from stock_trading.quant_stack.config import EvaluationConfig, PipelineConfig
 from stock_trading.quant_stack.rl import PortfolioConstructionRL
 
 
@@ -59,6 +68,30 @@ class DataLayerTests(unittest.TestCase):
 
         self.assertGreaterEqual(score, 0.05)
         self.assertLessEqual(score, 0.95)
+
+    def test_sanitize_ohlcv_download_keeps_partial_success_panel(self) -> None:
+        index = pd.date_range("2025-01-01", periods=4, freq="B")
+        columns = pd.MultiIndex.from_product(
+            [["Close", "Volume"], ["AAPL", "MSFT", "JNJ"]],
+            names=["field", "ticker"],
+        )
+        raw = pd.DataFrame(index=index, columns=columns, dtype=float)
+        raw[("Close", "AAPL")] = [100.0, 101.0, 102.0, 103.0]
+        raw[("Close", "MSFT")] = [200.0, 201.0, 202.0, 203.0]
+        raw[("Close", "JNJ")] = [np.nan, np.nan, np.nan, np.nan]
+        raw[("Volume", "AAPL")] = [10.0, 11.0, 12.0, 13.0]
+        raw[("Volume", "MSFT")] = [20.0, 21.0, 22.0, 23.0]
+        raw[("Volume", "JNJ")] = [np.nan, np.nan, np.nan, np.nan]
+
+        prices, volumes, returns, dropped = _sanitize_ohlcv_download(
+            raw,
+            ["AAPL", "MSFT", "JNJ"],
+        )
+
+        self.assertListEqual(list(prices.columns), ["AAPL", "MSFT"])
+        self.assertListEqual(list(volumes.columns), ["AAPL", "MSFT"])
+        self.assertIn("JNJ", dropped)
+        self.assertEqual(len(returns), 3)
 
 
 class PortfolioConstructionTests(unittest.TestCase):
@@ -137,6 +170,204 @@ class EvaluationTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(labels), len(set(labels)))
+
+    def test_research_defers_single_e2e_baseline_to_end(self) -> None:
+        index = pd.date_range("2025-01-01", periods=10, freq="B")
+        prices = pd.DataFrame({"SPY": np.linspace(100, 109, 10), "AAPL": np.linspace(50, 59, 10)}, index=index)
+        volumes = pd.DataFrame({"SPY": np.linspace(1000, 1009, 10), "AAPL": np.linspace(500, 509, 10)}, index=index)
+        returns = prices.pct_change().dropna()
+        call_log: list[tuple[str, bool]] = []
+
+        def fake_run_full_pipeline(*args, **kwargs):
+            config = kwargs["config"]
+            call_log.append((config.experiment.label, config.enable_e2e_baseline))
+            return {
+                "wealth": [1.0, 1.01],
+                "spy": [1.0, 1.0],
+                "factor": [1.0, 1.0],
+                "voltarget": [1.0, 1.0],
+                "ddlever": [1.0, 1.0],
+                "e2e_rl": [1.0, 1.0],
+                "experiment_label": config.experiment.label,
+                "turnover": [0.0],
+                "transaction_costs": [0.0],
+            }
+
+        eval_config = EvaluationConfig(
+            train_fracs=(0.4, 0.5),
+            rolling_window_days=20,
+            rolling_step_days=5,
+            min_rolling_windows=1,
+            max_rolling_windows=1,
+            cost_bps_grid=(5.0,),
+            rebalance_band_grid=(0.015,),
+            hedge_scale_grid=(1.0,),
+            macro_lag_grid=(3,),
+            reward_mode_grid=("differential_sharpe",),
+            bootstrap_samples=10,
+            enable_checkpoints=False,
+        )
+
+        with patch("stock_trading.quant_stack.evaluation.run_full_pipeline", side_effect=fake_run_full_pipeline), \
+             patch("pandas.DataFrame.to_csv", return_value=None), \
+             patch("stock_trading.quant_stack.evaluation._write_research_tables", return_value=None), \
+             patch("stock_trading.quant_stack.evaluation.plot_research_evaluation", return_value=None):
+            run_research_evaluation(
+                prices=prices,
+                volumes=volumes,
+                returns=returns,
+                macro_data=pd.DataFrame(index=returns.index),
+                sec_quality_scores=pd.Series(dtype=float),
+                base_config=PipelineConfig(),
+                evaluation_config=eval_config,
+            )
+
+        e2e_calls = [entry for entry in call_log if entry[1]]
+        self.assertEqual(len(e2e_calls), 1)
+        self.assertEqual(call_log[-1], e2e_calls[0])
+        self.assertEqual(call_log[-1][0], "full_pipeline_tf0.50")
+
+    def test_research_resume_uses_cached_run_results(self) -> None:
+        index = pd.date_range("2025-01-01", periods=10, freq="B")
+        prices = pd.DataFrame({"SPY": np.linspace(100, 109, 10), "AAPL": np.linspace(50, 59, 10)}, index=index)
+        volumes = pd.DataFrame({"SPY": np.linspace(1000, 1009, 10), "AAPL": np.linspace(500, 509, 10)}, index=index)
+        returns = prices.pct_change().dropna()
+        eval_config = EvaluationConfig(
+            train_fracs=(0.4,),
+            rolling_window_days=20,
+            rolling_step_days=5,
+            min_rolling_windows=1,
+            max_rolling_windows=1,
+            cost_bps_grid=(5.0,),
+            rebalance_band_grid=(0.015,),
+            hedge_scale_grid=(1.0,),
+            macro_lag_grid=(3,),
+            reward_mode_grid=("differential_sharpe",),
+            bootstrap_samples=10,
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            eval_config.checkpoint_dir = tmpdir
+            call_count = 0
+
+            def fake_run_full_pipeline(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                config = kwargs["config"]
+                return {
+                    "wealth": [1.0, 1.01],
+                    "spy": [1.0, 1.0],
+                    "factor": [1.0, 1.0],
+                    "voltarget": [1.0, 1.0],
+                    "ddlever": [1.0, 1.0],
+                    "e2e_rl": [1.0, 1.0],
+                    "dates": list(returns.index),
+                    "experiment_label": config.experiment.label,
+                    "turnover": [0.0],
+                    "transaction_costs": [0.0],
+                }
+
+            common_patches = (
+                patch("pandas.DataFrame.to_csv", return_value=None),
+                patch("stock_trading.quant_stack.evaluation._write_research_tables", return_value=None),
+                patch("stock_trading.quant_stack.evaluation.plot_research_evaluation", return_value=None),
+            )
+
+            with patch("stock_trading.quant_stack.evaluation.run_full_pipeline", side_effect=fake_run_full_pipeline), \
+                 common_patches[0], common_patches[1], common_patches[2]:
+                run_research_evaluation(
+                    prices=prices,
+                    volumes=volumes,
+                    returns=returns,
+                    macro_data=pd.DataFrame(index=returns.index),
+                    sec_quality_scores=pd.Series(dtype=float),
+                    base_config=PipelineConfig(),
+                    evaluation_config=eval_config,
+                )
+
+            self.assertGreater(call_count, 0)
+            first_call_count = call_count
+            call_count = 0
+
+            with patch("stock_trading.quant_stack.evaluation.run_full_pipeline", side_effect=fake_run_full_pipeline), \
+                 common_patches[0], common_patches[1], common_patches[2]:
+                run_research_evaluation(
+                    prices=prices,
+                    volumes=volumes,
+                    returns=returns,
+                    macro_data=pd.DataFrame(index=returns.index),
+                    sec_quality_scores=pd.Series(dtype=float),
+                    base_config=PipelineConfig(),
+                    evaluation_config=eval_config,
+                )
+
+            self.assertEqual(call_count, 0)
+            self.assertGreater(first_call_count, 0)
+            progress_path = Path(tmpdir) / "research_progress.json"
+            self.assertTrue(progress_path.exists())
+            progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(progress_payload["status"], "completed")
+            self.assertGreater(progress_payload["completed_runs"], 0)
+
+    def test_research_ignores_legacy_checkpoint_payloads(self) -> None:
+        index = pd.date_range("2025-01-01", periods=10, freq="B")
+        prices = pd.DataFrame({"SPY": np.linspace(100, 109, 10), "AAPL": np.linspace(50, 59, 10)}, index=index)
+        volumes = pd.DataFrame({"SPY": np.linspace(1000, 1009, 10), "AAPL": np.linspace(500, 509, 10)}, index=index)
+        returns = prices.pct_change().dropna()
+        eval_config = EvaluationConfig(
+            train_fracs=(0.4,),
+            rolling_window_days=20,
+            rolling_step_days=5,
+            min_rolling_windows=1,
+            max_rolling_windows=1,
+            cost_bps_grid=(5.0,),
+            rebalance_band_grid=(0.015,),
+            hedge_scale_grid=(1.0,),
+            macro_lag_grid=(3,),
+            reward_mode_grid=("differential_sharpe",),
+            bootstrap_samples=10,
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            eval_config.checkpoint_dir = tmpdir
+            legacy_path = Path(tmpdir) / "ablation_factor_only_tf0.40.pkl"
+            with legacy_path.open("wb") as handle:
+                pickle.dump({"wealth": [1.0, 9.9], "spy": [1.0, 1.0]}, handle)
+
+            call_count = 0
+
+            def fake_run_full_pipeline(*args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                config = kwargs["config"]
+                return {
+                    "wealth": [1.0, 1.01],
+                    "spy": [1.0, 1.0],
+                    "factor": [1.0, 1.0],
+                    "voltarget": [1.0, 1.0],
+                    "ddlever": [1.0, 1.0],
+                    "e2e_rl": [1.0, 1.0],
+                    "dates": list(returns.index),
+                    "experiment_label": config.experiment.label,
+                    "turnover": [0.0],
+                    "transaction_costs": [0.0],
+                }
+
+            with patch("stock_trading.quant_stack.evaluation.run_full_pipeline", side_effect=fake_run_full_pipeline), \
+                 patch("pandas.DataFrame.to_csv", return_value=None), \
+                 patch("stock_trading.quant_stack.evaluation._write_research_tables", return_value=None), \
+                 patch("stock_trading.quant_stack.evaluation.plot_research_evaluation", return_value=None):
+                run_research_evaluation(
+                    prices=prices,
+                    volumes=volumes,
+                    returns=returns,
+                    macro_data=pd.DataFrame(index=returns.index),
+                    sec_quality_scores=pd.Series(dtype=float),
+                    base_config=PipelineConfig(),
+                    evaluation_config=eval_config,
+                )
+
+            self.assertGreater(call_count, 0)
 
 
 if __name__ == "__main__":

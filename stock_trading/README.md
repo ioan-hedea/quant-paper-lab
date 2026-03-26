@@ -51,6 +51,27 @@ source .venv/bin/activate
 MPLCONFIGDIR=/tmp/matplotlib python stock_trading/quant_research.py
 ```
 
+Research and pipeline runs now auto-log to `stock_trading/logs/`. For example,
+`quant_research.py` updates:
+
+- `stock_trading/logs/latest_quant_research.log`
+- `stock_trading/checkpoints/research_runs/research_progress.json`
+
+You can still override the log destination with `QUANT_LOG_FILE`:
+
+```bash
+source .venv/bin/activate
+QUANT_LOG_FILE="stock_trading/logs/quant_research_$(date +%Y%m%d_%H%M%S).log" \
+MPLCONFIGDIR=/tmp/matplotlib \
+python stock_trading/quant_research.py
+```
+
+Then follow it remotely with:
+
+```bash
+tail -f stock_trading/logs/latest_quant_research.log
+```
+
 ## Output Files
 
 Running the pipeline regenerates:

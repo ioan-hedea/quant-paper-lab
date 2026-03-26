@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
 import json
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
+import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +15,8 @@ import pandas as pd
 
 from .config import EvaluationConfig, ExperimentConfig, PipelineConfig, RISK_FREE_RATE
 from .pipeline import run_full_pipeline
+
+CHECKPOINT_SCHEMA_VERSION = 1
 
 
 def _daily_returns_from_path(path: list[float]) -> np.ndarray:
@@ -641,6 +646,133 @@ def plot_research_evaluation(
     plt.close(fig)
 
 
+def _checkpoint_path(checkpoint_dir: Path, run_key: str) -> Path:
+    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in run_key)
+    return checkpoint_dir / f"{safe_name}.pkl"
+
+
+def _progress_path(checkpoint_dir: Path) -> Path:
+    return checkpoint_dir / "research_progress.json"
+
+
+def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
+    if frame.empty:
+        return {'rows': 0, 'columns': [], 'start': None, 'end': None}
+    return {
+        'rows': int(len(frame)),
+        'columns': [str(col) for col in frame.columns],
+        'start': str(frame.index[0]),
+        'end': str(frame.index[-1]),
+    }
+
+
+def _series_signature(series: pd.Series) -> dict[str, object]:
+    if series.empty:
+        return {'rows': 0, 'sum': 0.0}
+    numeric = pd.to_numeric(series, errors='coerce').fillna(0.0)
+    return {
+        'rows': int(len(series)),
+        'sum': round(float(numeric.sum()), 10),
+    }
+
+
+def _checkpoint_metadata(
+    run_prices: pd.DataFrame,
+    run_volumes: pd.DataFrame,
+    run_returns: pd.DataFrame,
+    run_macro: pd.DataFrame,
+    sec_quality_scores: pd.Series,
+    run_config: PipelineConfig,
+    *,
+    suite: str,
+    include_e2e: bool,
+    run_key: str,
+) -> dict[str, object]:
+    return {
+        'schema_version': CHECKPOINT_SCHEMA_VERSION,
+        'run_key': run_key,
+        'suite': suite,
+        'include_e2e': include_e2e,
+        'config': asdict(run_config),
+        'prices': _frame_signature(run_prices),
+        'volumes': _frame_signature(run_volumes),
+        'returns': _frame_signature(run_returns),
+        'macro': _frame_signature(run_macro),
+        'sec_quality': _series_signature(sec_quality_scores),
+    }
+
+
+def _load_checkpoint_results(
+    checkpoint_path: Path,
+    expected_metadata: dict[str, object],
+) -> dict[str, object] | None:
+    try:
+        with checkpoint_path.open('rb') as handle:
+            payload = pickle.load(handle)
+    except Exception:
+        print(f"  Ignoring unreadable checkpoint at {checkpoint_path}; recomputing.")
+        return None
+
+    if not isinstance(payload, dict) or 'results' not in payload or 'metadata' not in payload:
+        print(f"  Ignoring legacy checkpoint at {checkpoint_path}; recomputing.")
+        return None
+
+    if payload.get('schema_version') != CHECKPOINT_SCHEMA_VERSION:
+        print(f"  Ignoring incompatible checkpoint at {checkpoint_path}; recomputing.")
+        return None
+
+    if payload.get('metadata') != expected_metadata:
+        print(f"  Ignoring mismatched checkpoint at {checkpoint_path}; recomputing.")
+        return None
+
+    return payload['results']
+
+
+def _sanitize_for_checkpoint(value: object) -> object:
+    try:
+        pickle.dumps(value)
+        return value
+    except Exception:
+        pass
+
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {str(key): _sanitize_for_checkpoint(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_for_checkpoint(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_for_checkpoint(item) for item in value)
+    if isinstance(value, Path):
+        return str(value)
+
+    return {
+        '__checkpoint_repr__': repr(value),
+        '__checkpoint_type__': type(value).__name__,
+    }
+
+
+def _write_progress_manifest(
+    checkpoint_dir: Path,
+    *,
+    total_runs: int,
+    completed_run_keys: list[str],
+    status: str,
+    current_run: dict[str, object] | None,
+    last_completed_run: dict[str, object] | None,
+) -> None:
+    payload = {
+        'updated_at': datetime.now().isoformat(),
+        'status': status,
+        'total_runs': total_runs,
+        'completed_runs': len(completed_run_keys),
+        'completed_run_keys': completed_run_keys,
+        'current_run': current_run,
+        'last_completed_run': last_completed_run,
+    }
+    _progress_path(checkpoint_dir).write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+
 def run_research_evaluation(
     prices: pd.DataFrame,
     volumes: pd.DataFrame,
@@ -663,11 +795,163 @@ def run_research_evaluation(
     evaluation_config = evaluation_config or EvaluationConfig()
     macro_data = macro_data if macro_data is not None else pd.DataFrame(index=returns.index)
     sec_quality_scores = sec_quality_scores if sec_quality_scores is not None else pd.Series(dtype=float)
+    checkpoint_dir = Path(evaluation_config.checkpoint_dir)
+    if evaluation_config.enable_checkpoints:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Research checkpoints enabled: {checkpoint_dir}")
 
     metric_rows: list[dict[str, float | str]] = []
     regime_rows: list[dict[str, float | str]] = []
     rolling_reference_rows: list[dict[str, float | str]] = []
     baseline_results: dict[str, object] | None = None
+    deferred_baseline_config: PipelineConfig | None = None
+    first_ppo_logs_shown = False
+    total_runs = (
+        len(build_ablation_suite(base_config)) * len(evaluation_config.train_fracs)
+        + (
+            0
+            if any(abs(train_frac - base_config.train_frac) < 1e-12 for train_frac in evaluation_config.train_fracs)
+            else 1
+        )
+        + len(_rolling_starts(
+            n_obs=len(returns),
+            window_days=evaluation_config.rolling_window_days,
+            step_days=evaluation_config.rolling_step_days,
+            min_windows=evaluation_config.min_rolling_windows,
+            max_windows=evaluation_config.max_rolling_windows,
+        ))
+        + len(evaluation_config.cost_bps_grid)
+        + len(evaluation_config.rebalance_band_grid)
+        + len(evaluation_config.hedge_scale_grid)
+        + len(evaluation_config.macro_lag_grid)
+        + len(evaluation_config.reward_mode_grid)
+    )
+    run_counter = 0
+    completed_run_keys: list[str] = []
+    last_completed_run: dict[str, object] | None = None
+
+    if evaluation_config.enable_checkpoints:
+        _write_progress_manifest(
+            checkpoint_dir,
+            total_runs=total_runs,
+            completed_run_keys=completed_run_keys,
+            status='running',
+            current_run=None,
+            last_completed_run=last_completed_run,
+        )
+
+    def _run_with_research_logging(
+        run_prices: pd.DataFrame,
+        run_volumes: pd.DataFrame,
+        run_returns: pd.DataFrame,
+        run_macro: pd.DataFrame,
+        run_config: PipelineConfig,
+        *,
+        suite: str,
+        include_e2e: bool,
+        run_key: str,
+    ) -> dict[str, object]:
+        nonlocal first_ppo_logs_shown, run_counter, last_completed_run
+        run_counter += 1
+        run_config.enable_e2e_baseline = include_e2e
+        print(
+            f"\nResearch run {run_counter}/{total_runs}: "
+            f"{suite} [{run_config.experiment.label}]"
+        )
+        checkpoint_path = _checkpoint_path(checkpoint_dir, run_key)
+        checkpoint_metadata = _checkpoint_metadata(
+            run_prices,
+            run_volumes,
+            run_returns,
+            run_macro,
+            sec_quality_scores,
+            run_config,
+            suite=suite,
+            include_e2e=include_e2e,
+            run_key=run_key,
+        )
+        current_run = {
+            'ordinal': run_counter,
+            'total_runs': total_runs,
+            'suite': suite,
+            'label': run_config.experiment.label,
+            'run_key': run_key,
+            'include_e2e': include_e2e,
+        }
+        if evaluation_config.enable_checkpoints:
+            _write_progress_manifest(
+                checkpoint_dir,
+                total_runs=total_runs,
+                completed_run_keys=completed_run_keys,
+                status='running',
+                current_run=current_run,
+                last_completed_run=last_completed_run,
+            )
+        if evaluation_config.enable_checkpoints and checkpoint_path.exists():
+            cached_results = _load_checkpoint_results(checkpoint_path, checkpoint_metadata)
+            if cached_results is not None:
+                print(f"  Loading cached result from {checkpoint_path}")
+                if include_e2e:
+                    first_ppo_logs_shown = True
+                completed_run_keys.append(run_key)
+                last_completed_run = {
+                    **current_run,
+                    'source': 'cache',
+                    'completed_at': datetime.now().isoformat(),
+                    'checkpoint_path': str(checkpoint_path),
+                }
+                _write_progress_manifest(
+                    checkpoint_dir,
+                    total_runs=total_runs,
+                    completed_run_keys=completed_run_keys,
+                    status='running',
+                    current_run=None,
+                    last_completed_run=last_completed_run,
+                )
+                return cached_results
+        if include_e2e and not first_ppo_logs_shown:
+            run_config.e2e_ppo_verbose = 1
+            run_config.e2e_ppo_log_interval = 10
+            print("  Research note: showing PPO training logs for this first run only.")
+            first_ppo_logs_shown = True
+        else:
+            run_config.e2e_ppo_verbose = 0
+        results = run_full_pipeline(
+            run_prices,
+            run_volumes,
+            run_returns,
+            macro_data=run_macro,
+            sec_quality_scores=sec_quality_scores,
+            config=run_config,
+        )
+        if evaluation_config.enable_checkpoints:
+            checkpoint_payload = {
+                'schema_version': CHECKPOINT_SCHEMA_VERSION,
+                'saved_at': datetime.now().isoformat(),
+                'metadata': checkpoint_metadata,
+                'results': _sanitize_for_checkpoint(results),
+            }
+            temp_checkpoint_path = checkpoint_path.with_suffix(f"{checkpoint_path.suffix}.tmp")
+            with temp_checkpoint_path.open('wb') as handle:
+                pickle.dump(checkpoint_payload, handle)
+            temp_checkpoint_path.replace(checkpoint_path)
+            print(f"  Saved checkpoint to {checkpoint_path}")
+            completed_run_keys.append(run_key)
+            last_completed_run = {
+                **current_run,
+                'source': 'fresh',
+                'completed_at': datetime.now().isoformat(),
+                'checkpoint_path': str(checkpoint_path),
+            }
+            _write_progress_manifest(
+                checkpoint_dir,
+                total_runs=total_runs,
+                completed_run_keys=completed_run_keys,
+                status='running',
+                current_run=None,
+                last_completed_run=last_completed_run,
+            )
+        return results
 
     for config in build_ablation_suite(base_config):
         base_label = config.experiment.label
@@ -675,13 +959,23 @@ def run_research_evaluation(
             run_config = copy.deepcopy(config)
             run_config.train_frac = train_frac
             run_config.experiment.label = f'{base_label}_tf{train_frac:.2f}'
-            results = run_full_pipeline(
+            should_defer_baseline_e2e = (
+                evaluation_config.research_e2e_scope == 'baseline_only'
+                and base_label == 'full_pipeline'
+                and abs(train_frac - base_config.train_frac) < 1e-12
+            )
+            if should_defer_baseline_e2e:
+                deferred_baseline_config = copy.deepcopy(run_config)
+                continue
+            results = _run_with_research_logging(
                 prices,
                 volumes,
                 returns,
-                macro_data=macro_data,
-                sec_quality_scores=sec_quality_scores,
-                config=run_config,
+                macro_data,
+                run_config,
+                suite='ablation',
+                include_e2e=evaluation_config.research_e2e_scope == 'all',
+                run_key=f"ablation_{run_config.experiment.label}",
             )
             row = _metric_summary(results)
             row.update({'suite': 'ablation', 'window_id': 'full_sample', 'param_name': 'train_frac', 'param_value': train_frac})
@@ -690,29 +984,19 @@ def run_research_evaluation(
             if base_label == 'full_pipeline' and abs(train_frac - base_config.train_frac) < 1e-12:
                 baseline_results = results
 
-    if baseline_results is None:
-        baseline_config = copy.deepcopy(base_config)
-        baseline_config.experiment.label = 'full_pipeline_baseline'
-        baseline_results = run_full_pipeline(
-            prices,
-            volumes,
-            returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=baseline_config,
-        )
-
     strict_timing = copy.deepcopy(base_config)
     strict_timing.feature_availability.macro_lag_days = max(evaluation_config.macro_lag_grid)
     strict_timing.feature_availability.allow_static_sec_quality = False
     strict_timing.experiment.label = 'full_pipeline_strict_timing'
-    strict_results = run_full_pipeline(
+    strict_results = _run_with_research_logging(
         prices,
         volumes,
         returns,
-        macro_data=macro_data,
-        sec_quality_scores=sec_quality_scores,
-        config=strict_timing,
+        macro_data,
+        strict_timing,
+        suite='timing_discipline',
+        include_e2e=evaluation_config.research_e2e_scope == 'all',
+        run_key='timing_discipline_full_pipeline_strict_timing',
     )
     strict_row = _metric_summary(strict_results)
     strict_row.update({'suite': 'timing_discipline', 'window_id': 'full_sample', 'param_name': 'strict_timing', 'param_value': 1})
@@ -734,13 +1018,15 @@ def run_research_evaluation(
         rolling_config = copy.deepcopy(base_config)
         rolling_config.train_frac = evaluation_config.rolling_train_frac
         rolling_config.experiment.label = 'full_pipeline'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             p_slice,
             v_slice,
             r_slice,
-            macro_data=m_slice,
-            sec_quality_scores=sec_quality_scores,
-            config=rolling_config,
+            m_slice,
+            rolling_config,
+            suite='rolling_window',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"rolling_window_{window_id}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'rolling_window', 'window_id': window_id, 'param_name': 'window_start', 'param_value': str(r_slice.index[0].date())})
@@ -763,13 +1049,15 @@ def run_research_evaluation(
         cost_config = copy.deepcopy(base_config)
         cost_config.cost_model.base_cost_bps = base_cost_bps
         cost_config.experiment.label = 'full_pipeline'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             prices,
             volumes,
             returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=cost_config,
+            macro_data,
+            cost_config,
+            suite='cost_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"cost_sensitivity_{base_cost_bps}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'cost_sensitivity', 'window_id': 'full_sample', 'param_name': 'base_cost_bps', 'param_value': base_cost_bps})
@@ -779,13 +1067,15 @@ def run_research_evaluation(
         band_config = copy.deepcopy(base_config)
         band_config.rebalance_band = rebalance_band
         band_config.experiment.label = 'full_pipeline'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             prices,
             volumes,
             returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=band_config,
+            macro_data,
+            band_config,
+            suite='rebalance_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"rebalance_sensitivity_{rebalance_band}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'rebalance_sensitivity', 'window_id': 'full_sample', 'param_name': 'rebalance_band', 'param_value': rebalance_band})
@@ -795,13 +1085,15 @@ def run_research_evaluation(
         hedge_config = copy.deepcopy(base_config)
         hedge_config.hedge_ratios = tuple(round(h * hedge_scale, 4) for h in hedge_config.hedge_ratios)
         hedge_config.experiment.label = 'full_pipeline'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             prices,
             volumes,
             returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=hedge_config,
+            macro_data,
+            hedge_config,
+            suite='hedge_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"hedge_sensitivity_{hedge_scale}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'hedge_sensitivity', 'window_id': 'full_sample', 'param_name': 'hedge_scale', 'param_value': hedge_scale})
@@ -811,13 +1103,15 @@ def run_research_evaluation(
         lag_config = copy.deepcopy(base_config)
         lag_config.feature_availability.macro_lag_days = macro_lag
         lag_config.experiment.label = 'full_pipeline'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             prices,
             volumes,
             returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=lag_config,
+            macro_data,
+            lag_config,
+            suite='macro_lag_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"macro_lag_sensitivity_{macro_lag}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'macro_lag_sensitivity', 'window_id': 'full_sample', 'param_name': 'macro_lag_days', 'param_value': macro_lag})
@@ -829,13 +1123,15 @@ def run_research_evaluation(
         reward_config.hedge_reward_mode = reward_mode if reward_mode != 'differential_sharpe' else 'asymmetric_return'
         reward_config.e2e_reward_mode = reward_mode
         reward_config.experiment.label = f'full_pipeline_reward_{reward_mode}'
-        results = run_full_pipeline(
+        results = _run_with_research_logging(
             prices,
             volumes,
             returns,
-            macro_data=macro_data,
-            sec_quality_scores=sec_quality_scores,
-            config=reward_config,
+            macro_data,
+            reward_config,
+            suite='reward_ablation',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"reward_ablation_{reward_mode}",
         )
         row = _metric_summary(results)
         row.update({'suite': 'reward_ablation', 'window_id': 'full_sample', 'param_name': 'reward_mode', 'param_value': reward_mode})
@@ -845,6 +1141,36 @@ def run_research_evaluation(
         if 'ann_return' in e2e_row:
             e2e_row.update({'suite': 'reward_ablation', 'window_id': 'full_sample', 'param_name': 'reward_mode', 'param_value': f'e2e_{reward_mode}'})
             metric_rows.append(e2e_row)
+
+    if deferred_baseline_config is not None:
+        baseline_results = _run_with_research_logging(
+            prices,
+            volumes,
+            returns,
+            macro_data,
+            deferred_baseline_config,
+            suite='ablation',
+            include_e2e=True,
+            run_key=f"ablation_{deferred_baseline_config.experiment.label}",
+        )
+        row = _metric_summary(baseline_results)
+        row.update({'suite': 'ablation', 'window_id': 'full_sample', 'param_name': 'train_frac', 'param_value': deferred_baseline_config.train_frac})
+        metric_rows.append(row)
+        regime_rows.extend(_regime_summary(baseline_results))
+
+    if baseline_results is None:
+        baseline_config = copy.deepcopy(base_config)
+        baseline_config.experiment.label = 'full_pipeline_baseline'
+        baseline_results = _run_with_research_logging(
+            prices,
+            volumes,
+            returns,
+            macro_data,
+            baseline_config,
+            suite='baseline_backfill',
+            include_e2e=evaluation_config.research_e2e_scope in {'all', 'baseline_only'},
+            run_key='baseline_backfill_full_pipeline_baseline',
+        )
 
     metrics = pd.DataFrame(metric_rows)
     regime_summary = pd.DataFrame(regime_rows)
@@ -910,6 +1236,16 @@ def run_research_evaluation(
     }
     with open('stock_trading/research_summary.json', 'w', encoding='utf-8') as handle:
         json.dump(summary, handle, indent=2)
+
+    if evaluation_config.enable_checkpoints:
+        _write_progress_manifest(
+            checkpoint_dir,
+            total_runs=total_runs,
+            completed_run_keys=completed_run_keys,
+            status='completed',
+            current_run=None,
+            last_completed_run=last_completed_run,
+        )
 
     return {
         'metrics': metrics,

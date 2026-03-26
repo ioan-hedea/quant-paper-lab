@@ -746,6 +746,8 @@ def run_e2e_baseline(
     risk_free_rate: float = 0.035,
     reward_mode: str = 'differential_sharpe',
     total_timesteps: int = 50_000,
+    verbose: int = 0,
+    log_interval: int = 10,
 ) -> dict[str, object]:
     """
     Train PPO on the training period and evaluate on the test period.
@@ -775,9 +777,9 @@ def run_e2e_baseline(
         batch_size=64,
         n_epochs=10,
         gamma=0.99,
-        verbose=0,
+        verbose=verbose,
     )
-    model.learn(total_timesteps=total_timesteps)
+    model.learn(total_timesteps=total_timesteps, log_interval=max(1, log_interval))
 
     # Evaluate on test period
     test_env = EndToEndTradingEnv(

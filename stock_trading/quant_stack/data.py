@@ -22,6 +22,27 @@ from .config import (
     UNIVERSE,
 )
 
+def _sanitize_ohlcv_download(
+    data: pd.DataFrame,
+    requested_tickers: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+    """Drop fully missing tickers while keeping the rest of the panel usable."""
+    if data.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), requested_tickers
+
+    close = data['Close'].dropna(axis=1, how='all')
+    volume = data['Volume'].dropna(axis=1, how='all')
+    common_tickers = close.columns.intersection(volume.columns)
+    dropped_tickers = sorted(set(requested_tickers) - set(common_tickers))
+
+    prices = close.loc[:, common_tickers].dropna()
+    volumes = volume.loc[:, common_tickers].dropna()
+    returns = prices.pct_change().dropna()
+
+    common_idx = prices.index.intersection(volumes.index).intersection(returns.index)
+    return prices.loc[common_idx], volumes.loc[common_idx], returns.loc[common_idx], dropped_tickers
+
+
 def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series]:
     """Download OHLCV for the full universe + benchmark."""
     print("=" * 60)
@@ -29,23 +50,22 @@ def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Dat
     print("=" * 60)
     all_tickers = list(set(UNIVERSE + [BENCHMARK]))
     data = yf.download(all_tickers, period=DATA_PERIOD, auto_adjust=True)
-    prices = data['Close'].dropna()
-    volumes = data['Volume'].dropna()
-    returns = prices.pct_change().dropna()
+    prices, volumes, returns, dropped_tickers = _sanitize_ohlcv_download(data, all_tickers)
 
-    # Align all
-    common_idx = prices.index.intersection(volumes.index).intersection(returns.index)
-    prices = prices.loc[common_idx]
-    volumes = volumes.loc[common_idx]
-    returns = returns.loc[common_idx]
-
-    if common_idx.empty:
+    if prices.empty or volumes.empty or returns.empty:
         raise RuntimeError(
             "No market data was downloaded from yfinance. "
             "Check network access or the upstream data source and try again."
         )
+    if BENCHMARK not in prices.columns:
+        raise RuntimeError(
+            f"Benchmark {BENCHMARK} was not downloaded from yfinance. "
+            "Check network access or try again."
+        )
+    if dropped_tickers:
+        print(f"  Dropped tickers with no downloaded OHLCV: {dropped_tickers}")
 
-    macro_data = load_macro_data(common_idx)
+    macro_data = load_macro_data(prices.index)
     sec_quality_scores = load_sec_quality_scores([t for t in UNIVERSE if t in prices.columns])
 
     print(f"  Loaded {len(prices)} trading days for {len(all_tickers)} tickers")

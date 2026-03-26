@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
 
 from stock_trading.quant_stack.data import load_market_data
 from stock_trading.quant_stack.evaluation import run_research_evaluation
+from stock_trading.logging_utils import tee_output_from_env
 
 
 def main() -> None:
@@ -42,4 +43,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with tee_output_from_env("quant_research"):
+        main()

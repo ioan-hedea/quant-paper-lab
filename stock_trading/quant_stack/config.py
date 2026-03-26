@@ -124,6 +124,9 @@ class PipelineConfig:
     portfolio_reward_mode: str = 'differential_sharpe'
     hedge_reward_mode: str = 'asymmetric_return'
     e2e_reward_mode: str = 'differential_sharpe'
+    enable_e2e_baseline: bool = True
+    e2e_ppo_verbose: int = 0
+    e2e_ppo_log_interval: int = 10
     feature_availability: FeatureAvailabilityConfig = field(default_factory=FeatureAvailabilityConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
@@ -145,6 +148,9 @@ class EvaluationConfig:
     hedge_scale_grid: tuple[float, ...] = (0.75, 1.0, 1.25)
     macro_lag_grid: tuple[int, ...] = (1, 3, 5)
     reward_mode_grid: tuple[str, ...] = ('differential_sharpe', 'return', 'sortino')
+    research_e2e_scope: str = 'baseline_only'
+    enable_checkpoints: bool = True
+    checkpoint_dir: str = 'stock_trading/checkpoints/research_runs'
     bootstrap_samples: int = 400
     bootstrap_block_size: int = 20
     bootstrap_seed: int = 7

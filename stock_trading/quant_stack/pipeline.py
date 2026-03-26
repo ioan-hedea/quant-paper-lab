@@ -409,59 +409,65 @@ def run_full_pipeline(
     results['feature_contracts'] = _build_feature_contracts(config)
 
     # --- End-to-End RL Baseline (PPO) ---
-    try:
-        from .rl import build_e2e_features, run_e2e_baseline
+    if config.enable_e2e_baseline:
+        try:
+            from .rl import build_e2e_features, run_e2e_baseline
 
-        print("  Running end-to-end RL (PPO) baseline...")
-        backtest_start = max(252, train_end)
+            print("  Running end-to-end RL (PPO) baseline...")
+            backtest_start = max(252, train_end)
 
-        def _factor_scores_fn(t):
-            scores, _ = ff.get_factor_scores(max(0, t - 1))
-            return scores.values
+            def _factor_scores_fn(t):
+                scores, _ = ff.get_factor_scores(max(0, t - 1))
+                return scores.values
 
-        def _garch_vols_fn(t):
-            vols = garch.forecast_all(max(0, t - 1))
-            return vols.values if len(vols) > 0 else np.zeros(len(tickers))
+            def _garch_vols_fn(t):
+                vols = garch.forecast_all(max(0, t - 1))
+                return vols.values if len(vols) > 0 else np.zeros(len(tickers))
 
-        def _regime_fn(t):
-            return hmm.get_regime_belief(max(0, t - 1), market_ret)
+            def _regime_fn(t):
+                return hmm.get_regime_belief(max(0, t - 1), market_ret)
 
-        def _macro_fn(t):
-            if not macro_data.empty and dates[max(0, t - 1)] in macro_data.index:
-                mw = macro_data.loc[:dates[max(0, t - 1)]].tail(252)
-                return compute_macro_regime_signal(mw)
-            return 0.5
+            def _macro_fn(t):
+                if not macro_data.empty and dates[max(0, t - 1)] in macro_data.index:
+                    mw = macro_data.loc[:dates[max(0, t - 1)]].tail(252)
+                    return compute_macro_regime_signal(mw)
+                return 0.5
 
-        e2e_feature_fn = build_e2e_features(
-            returns, tickers,
-            _factor_scores_fn, _garch_vols_fn,
-            _regime_fn, _macro_fn,
-        )
+            e2e_feature_fn = build_e2e_features(
+                returns, tickers,
+                _factor_scores_fn, _garch_vols_fn,
+                _regime_fn, _macro_fn,
+            )
 
-        e2e_results = run_e2e_baseline(
-            returns=returns,
-            tickers=tickers,
-            feature_fn=e2e_feature_fn,
-            train_start=backtest_start,
-            train_end=train_end + (n - train_end) // 2 if train_end < n else train_end,
-            test_end=n,
-            cost_bps=config.cost_model.base_cost_bps,
-            risk_free_rate=RISK_FREE_RATE,
-            reward_mode=config.e2e_reward_mode,
-            total_timesteps=30_000,
-        )
+            e2e_results = run_e2e_baseline(
+                returns=returns,
+                tickers=tickers,
+                feature_fn=e2e_feature_fn,
+                train_start=backtest_start,
+                train_end=train_end + (n - train_end) // 2 if train_end < n else train_end,
+                test_end=n,
+                cost_bps=config.cost_model.base_cost_bps,
+                risk_free_rate=RISK_FREE_RATE,
+                reward_mode=config.e2e_reward_mode,
+                total_timesteps=30_000,
+                verbose=config.e2e_ppo_verbose,
+                log_interval=config.e2e_ppo_log_interval,
+            )
 
-        # Align e2e wealth path to test period dates
-        e2e_wealth = e2e_results['wealth']
-        # Pad with 1.0 for dates before e2e test starts
-        n_test_dates = len(results['dates'])
-        n_e2e = len(e2e_wealth) - 1  # exclude initial 1.0
-        pad_len = n_test_dates - n_e2e
-        results['e2e_rl'] = [1.0] * (pad_len + 1) + e2e_wealth[1:]
-        print(f"  E2E RL final wealth: {e2e_wealth[-1]:.3f}")
+            # Align e2e wealth path to test period dates
+            e2e_wealth = e2e_results['wealth']
+            # Pad with 1.0 for dates before e2e test starts
+            n_test_dates = len(results['dates'])
+            n_e2e = len(e2e_wealth) - 1  # exclude initial 1.0
+            pad_len = n_test_dates - n_e2e
+            results['e2e_rl'] = [1.0] * (pad_len + 1) + e2e_wealth[1:]
+            print(f"  E2E RL final wealth: {e2e_wealth[-1]:.3f}")
 
-    except Exception as e:
-        print(f"  End-to-end RL baseline skipped: {e}")
+        except Exception as e:
+            print(f"  End-to-end RL baseline skipped: {e}")
+            results['e2e_rl'] = [1.0] * (len(results['dates']) + 1)
+    else:
+        print("  End-to-end RL baseline disabled for this run.")
         results['e2e_rl'] = [1.0] * (len(results['dates']) + 1)
 
     print(f"\n  Final wealth: {wealth:.3f} (Pipeline) vs {spy_wealth:.3f} (SPY)")
