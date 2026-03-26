@@ -205,6 +205,34 @@ class GARCHForecaster:
                 vols[ticker] = self.forecast_vol(ticker, date_idx)
         return pd.Series(vols)
 
+    def forecast_vol_uncertainty(self, date_idx: int, lookback: int = 21) -> float:
+        """
+        Measure uncertainty in the GARCH vol forecast as the coefficient of
+        variation of the vol forecasts over the recent lookback window.
+        High CV means the vol forecast has been moving around a lot — the model
+        is uncertain about the current volatility regime.
+        """
+        if date_idx < lookback + 5:
+            return 0.5
+        recent_vols = []
+        for step in range(lookback):
+            idx = date_idx - step
+            if idx < 10:
+                break
+            ticker_vols = []
+            for ticker in UNIVERSE:
+                if ticker in self.returns.columns:
+                    v = self.forecast_vol(ticker, idx)
+                    if np.isfinite(v) and v > 0:
+                        ticker_vols.append(v)
+            if ticker_vols:
+                recent_vols.append(float(np.mean(ticker_vols)))
+        if len(recent_vols) < 5:
+            return 0.5
+        arr = np.array(recent_vols, dtype=float)
+        cv = arr.std() / (arr.mean() + 1e-8)
+        return float(np.clip(cv / 0.5, 0.0, 1.0))
+
 
 # --- 2D. HMM Regime Detection ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
+from sklearn.covariance import LedoitWolf
 
 from .alpha import (
     AlphaCombiner,
@@ -96,6 +97,11 @@ def _compute_portfolio_reward(
         downside = recent_portfolio_rets[recent_portfolio_rets < 0]
         downside_std = float(downside.std()) if len(downside) > 0 else 1e-8
         return float((portfolio_ret - recent_portfolio_rets.mean()) / (downside_std + 1e-8))
+    if reward_mode == 'mean_variance':
+        if len(recent_portfolio_rets) <= 5:
+            return float(portfolio_ret * 100.0)
+        lam = 2.0  # risk-aversion coefficient
+        return float(portfolio_ret * 100.0 - lam * float(np.var(recent_portfolio_rets)) * 100.0)
     if len(recent_portfolio_rets) <= 5:
         return float(portfolio_ret * 100.0)
     return float((portfolio_ret - recent_portfolio_rets.mean()) / (recent_portfolio_rets.std() + 1e-8))
@@ -160,10 +166,11 @@ def run_full_pipeline(
     factor_wealth = 1.0
     voltarget_wealth = 1.0
     ddlever_wealth = 1.0
+    riskparity_wealth = 1.0
 
     results = {
         'dates': [], 'wealth': [1.0], 'spy': [1.0], 'equal': [1.0], 'factor': [1.0],
-        'voltarget': [1.0], 'ddlever': [1.0],
+        'voltarget': [1.0], 'ddlever': [1.0], 'risk_parity': [1.0],
         'actions': [], 'hedge_actions': [], 'regime_beliefs': [],
         'factor_scores_hist': [], 'portfolio_weights': [],
         'garch_vols': [], 'pairs_info_hist': [],
@@ -171,7 +178,8 @@ def run_full_pipeline(
         'turnover': [], 'hedge_pnl': [], 'source_weights_hist': [],
         'transaction_costs': [],
         'portfolio_returns': [], 'cash_weights': [], 'hedge_ratios': [],
-        'alpha_dispersion': [], 'regime_entropy': [], 'ic_instability': [], 'uncertainty_score': [],
+        'alpha_dispersion': [], 'regime_entropy': [], 'ic_instability': [],
+        'garch_vol_uncertainty': [], 'uncertainty_score': [],
     }
 
     peak = 1.0
@@ -233,10 +241,16 @@ def run_full_pipeline(
         alpha_dispersion = float(weighted_alpha.std())
         regime_uncertainty = _regime_entropy(regime_belief)
         ic_instability = float(np.clip(combiner.get_ic_instability(), 0.0, 1.0))
+        garch_vol_uncertainty = garch.forecast_vol_uncertainty(t - 1)
         alpha_dispersion_norm = float(np.clip(np.tanh(alpha_dispersion / 2.0), 0.0, 1.0))
         ic_instability_norm = float(np.clip(ic_instability / 0.20, 0.0, 1.0))
+        # Composite uncertainty: alpha dispersion (35%), regime entropy (30%),
+        # IC instability (20%), GARCH vol forecast CV (15%)
         uncertainty_score = float(np.clip(
-            0.45 * alpha_dispersion_norm + 0.35 * regime_uncertainty + 0.20 * ic_instability_norm,
+            0.35 * alpha_dispersion_norm
+            + 0.30 * regime_uncertainty
+            + 0.20 * ic_instability_norm
+            + 0.15 * garch_vol_uncertainty,
             0.0,
             1.0,
         ))
@@ -337,6 +351,20 @@ def run_full_pipeline(
         ddlever_wealth *= (1 + dd_ret)
         ddlever_peak = max(ddlever_peak, ddlever_wealth)
 
+        # Risk parity baseline: inverse-variance weights via Ledoit-Wolf covariance
+        rp_window = returns[tickers].iloc[max(0, t - 60):t]
+        if len(rp_window) >= 20:
+            try:
+                lw = LedoitWolf().fit(rp_window.values)
+                inv_var = 1.0 / (np.diag(lw.covariance_) + 1e-8)
+                rp_weights = inv_var / inv_var.sum()
+            except Exception:
+                rp_weights = np.ones(len(tickers)) / len(tickers)
+        else:
+            rp_weights = np.ones(len(tickers)) / len(tickers)
+        rp_ret = float(np.dot(rp_weights, daily_ret.values))
+        riskparity_wealth *= (1 + rp_ret)
+
         # --- RL Updates ---
         # Portfolio RL reward: differential Sharpe
         results['wealth'].append(wealth)
@@ -379,6 +407,7 @@ def run_full_pipeline(
         results['factor'].append(factor_wealth)
         results['voltarget'].append(voltarget_wealth)
         results['ddlever'].append(ddlever_wealth)
+        results['risk_parity'].append(riskparity_wealth)
         results['actions'].append(action)
         results['hedge_actions'].append(hedge_action)
         results['regime_beliefs'].append(regime_belief)
@@ -398,6 +427,7 @@ def run_full_pipeline(
         results['alpha_dispersion'].append(alpha_dispersion)
         results['regime_entropy'].append(regime_uncertainty)
         results['ic_instability'].append(ic_instability)
+        results['garch_vol_uncertainty'].append(garch_vol_uncertainty)
         results['uncertainty_score'].append(uncertainty_score)
 
     results['tickers'] = tickers

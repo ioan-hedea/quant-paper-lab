@@ -147,7 +147,7 @@ class EvaluationConfig:
     rebalance_band_grid: tuple[float, ...] = (0.005, 0.015, 0.03)
     hedge_scale_grid: tuple[float, ...] = (0.75, 1.0, 1.25)
     macro_lag_grid: tuple[int, ...] = (1, 3, 5)
-    reward_mode_grid: tuple[str, ...] = ('differential_sharpe', 'return', 'sortino')
+    reward_mode_grid: tuple[str, ...] = ('differential_sharpe', 'return', 'sortino', 'mean_variance')
     research_e2e_scope: str = 'baseline_only'
     enable_checkpoints: bool = True
     checkpoint_dir: str = 'stock_trading/checkpoints/research_runs'

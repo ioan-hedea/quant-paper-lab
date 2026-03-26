@@ -481,6 +481,11 @@ class DynamicHedgingRL:
             downside_std = float(downside.std()) if len(downside) > 0 else 1e-8
             return float((portfolio_return - rets.mean()) / (downside_std + 1e-8))
 
+        if reward_mode == 'mean_variance':
+            rets = np.array(self.reward_buffer, dtype=float)
+            lam = 2.0
+            return float(portfolio_return * 100.0 - lam * float(np.var(rets)) * 100.0 if len(rets) >= 6 else portfolio_return * 100.0)
+
         # Default: asymmetric return reward (losses penalized harder).
         if portfolio_return >= 0:
             return portfolio_return * 100
@@ -626,6 +631,13 @@ class EndToEndTradingEnv(gym.Env):
                 downside = rets_arr[rets_arr < 0]
                 downside_std = float(downside.std()) if len(downside) > 0 else 1e-8
                 reward = float((portfolio_ret - rets_arr.mean()) / (downside_std + 1e-8))
+            else:
+                reward = float(portfolio_ret * 100)
+        elif reward_mode == 'mean_variance':
+            if len(self._recent_returns) > 5:
+                rets_arr = np.array(self._recent_returns)
+                lam = 2.0
+                reward = float(portfolio_ret * 100.0 - lam * float(np.var(rets_arr)) * 100.0)
             else:
                 reward = float(portfolio_ret * 100)
         else:

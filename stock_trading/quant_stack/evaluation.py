@@ -15,6 +15,7 @@ import pandas as pd
 
 from .config import EvaluationConfig, ExperimentConfig, PipelineConfig, RISK_FREE_RATE
 from .pipeline import run_full_pipeline
+from .plots import plot_rolling_windows, plot_reward_ablation
 
 CHECKPOINT_SCHEMA_VERSION = 1
 
@@ -328,6 +329,34 @@ def build_ablation_suite(base_config: PipelineConfig) -> list[PipelineConfig]:
     factor_only.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
     configs.append(factor_only)
 
+    factor_plus_pairs = copy.deepcopy(base_config)
+    factor_plus_pairs.experiment = ExperimentConfig(
+        label='factor_plus_pairs',
+        use_factor=True,
+        use_pairs=True,
+        use_lstm=False,
+        adaptive_combiner=False,
+        use_portfolio_rl=False,
+        use_hedge_rl=False,
+    )
+    factor_plus_pairs.optimizer.use_optimizer = False
+    factor_plus_pairs.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
+    configs.append(factor_plus_pairs)
+
+    factor_plus_lstm = copy.deepcopy(base_config)
+    factor_plus_lstm.experiment = ExperimentConfig(
+        label='factor_plus_lstm',
+        use_factor=True,
+        use_pairs=False,
+        use_lstm=True,
+        adaptive_combiner=False,
+        use_portfolio_rl=False,
+        use_hedge_rl=False,
+    )
+    factor_plus_lstm.optimizer.use_optimizer = False
+    factor_plus_lstm.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
+    configs.append(factor_plus_lstm)
+
     alpha_stack = copy.deepcopy(base_config)
     alpha_stack.experiment = ExperimentConfig(
         label='alpha_stack_no_rl',
@@ -379,6 +408,8 @@ def _component_label(label: str) -> str:
 def _display_label(label: str) -> str:
     mapping = {
         'factor_only': 'Factor Only',
+        'factor_plus_pairs': 'Factor +\nPairs',
+        'factor_plus_lstm': 'Factor +\nLSTM',
         'alpha_stack_no_rl': 'Alpha Stack\nNo RL',
         'alpha_plus_portfolio_rl': 'Alpha +\nPortfolio RL',
         'alpha_plus_hedge_rl': 'Alpha +\nHedge RL',
@@ -388,6 +419,7 @@ def _display_label(label: str) -> str:
         'vol_target': 'Vol-Target',
         'dd_delever': 'DD-Delever',
         'e2e_rl': 'E2E RL\n(PPO)',
+        'risk_parity': 'Risk Parity',
     }
     if label.startswith('full_pipeline_reward_'):
         reward_name = label.replace('full_pipeline_reward_', '').replace('_', ' ').title()
@@ -423,7 +455,7 @@ def _build_ablation_summary(metrics: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
-    ordering = ['factor_only', 'alpha_stack_no_rl', 'alpha_plus_portfolio_rl', 'alpha_plus_hedge_rl', 'full_pipeline']
+    ordering = ['factor_only', 'factor_plus_pairs', 'factor_plus_lstm', 'alpha_stack_no_rl', 'alpha_plus_portfolio_rl', 'alpha_plus_hedge_rl', 'full_pipeline']
     summary['order'] = summary['component_label'].apply(lambda x: ordering.index(x) if x in ordering else len(ordering))
     summary = summary.sort_values('order').drop(columns='order')
     return summary
@@ -1215,6 +1247,8 @@ def run_research_evaluation(
         bootstrap_significance.to_csv('stock_trading/research_bootstrap_significance.csv', index=False)
     _write_research_tables(ablation_summary, robustness_summary, bootstrap_significance=bootstrap_significance)
     plot_research_evaluation(metrics, regime_summary, baseline_results=baseline_results, rolling_references=rolling_references)
+    plot_rolling_windows(metrics, rolling_references_df=rolling_references if not rolling_references.empty else None)
+    plot_reward_ablation(metrics)
 
     summary = {
         'base_config': asdict(base_config),

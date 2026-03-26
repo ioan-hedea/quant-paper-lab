@@ -598,3 +598,178 @@ def plot_execution_demo():
     plt.savefig('stock_trading/pipeline_execution_rl.png', dpi=150, bbox_inches='tight')
     plt.show()
 
+
+def plot_rolling_windows(
+    metrics_df: pd.DataFrame,
+    rolling_references_df: pd.DataFrame | None = None,
+) -> None:
+    """Figure 4: Rolling-window robustness — Sharpe and Calmar distributions across windows."""
+    rolling = metrics_df[metrics_df['suite'] == 'rolling_window'].copy()
+    if rolling.empty:
+        print("plot_rolling_windows: no rolling_window rows found; skipping.")
+        return
+
+    _ref_display = {
+        'SPY': 'SPY',
+        'factor_benchmark': 'Factor',
+        'vol_target': 'Vol-Target',
+        'dd_delever': 'DD-Delever',
+    }
+    _ref_colors = {
+        'SPY': 'black',
+        'factor_benchmark': '#FF9800',
+        'vol_target': '#4CAF50',
+        'dd_delever': '#9C27B0',
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig.suptitle('Figure 4: Rolling-Window Robustness — Sharpe and Calmar Distributions',
+                 fontsize=14, fontweight='bold')
+
+    for ax, metric, title, ylabel in [
+        (axes[0], 'sharpe', 'Sharpe Ratio across Rolling Windows', 'Sharpe Ratio'),
+        (axes[1], 'calmar', 'Calmar Ratio across Rolling Windows', 'Calmar Ratio'),
+    ]:
+        groups: dict[str, np.ndarray] = {}
+        group_colors: dict[str, str] = {}
+
+        groups['Full Pipeline'] = rolling[metric].values.astype(float)
+        group_colors['Full Pipeline'] = '#2196F3'
+
+        if rolling_references_df is not None and not rolling_references_df.empty:
+            for ref_label, display in _ref_display.items():
+                ref_group = rolling_references_df[rolling_references_df['label'] == ref_label]
+                if not ref_group.empty and metric in ref_group.columns:
+                    groups[display] = ref_group[metric].values.astype(float)
+                    group_colors[display] = _ref_colors[ref_label]
+
+        labels = list(groups.keys())
+        data = [groups[k] for k in labels]
+        colors = [group_colors[k] for k in labels]
+
+        bp = ax.boxplot(
+            data,
+            labels=labels,
+            patch_artist=True,
+            notch=False,
+            widths=0.5,
+            medianprops=dict(color='black', linewidth=2),
+        )
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.65)
+
+        # Overlay individual points
+        for i, (vals, color) in enumerate(zip(data, colors), start=1):
+            jitter = np.random.default_rng(seed=42 + i).uniform(-0.12, 0.12, size=len(vals))
+            ax.scatter(
+                np.full(len(vals), i) + jitter, vals,
+                color=color, s=30, zorder=5, alpha=0.8, edgecolors='black', linewidths=0.5,
+            )
+
+        ax.axhline(0, color='red', linewidth=0.7, linestyle=':', alpha=0.6)
+        ax.set_title(title, fontsize=11)
+        ax.set_ylabel(ylabel)
+        ax.tick_params(axis='x', rotation=15)
+        ax.grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    plt.savefig('stock_trading/pipeline_rolling_windows.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print("Saved: stock_trading/pipeline_rolling_windows.png")
+
+
+def plot_reward_ablation(metrics_df: pd.DataFrame) -> None:
+    """Figure 6: Reward function ablation — pipeline performance across 4 reward modes."""
+    reward_data = metrics_df[
+        (metrics_df['suite'] == 'reward_ablation') &
+        (metrics_df['label'].str.startswith('full_pipeline_reward_'))
+    ].copy()
+    if reward_data.empty:
+        print("plot_reward_ablation: no reward_ablation rows found; skipping.")
+        return
+
+    e2e_data = metrics_df[
+        (metrics_df['suite'] == 'reward_ablation') &
+        (metrics_df['label'].str.startswith('e2e_reward_'))
+    ].copy()
+
+    _mode_display = {
+        'full_pipeline_reward_differential_sharpe': 'Diff. Sharpe',
+        'full_pipeline_reward_return': 'Return',
+        'full_pipeline_reward_sortino': 'Sortino',
+        'full_pipeline_reward_mean_variance': 'Mean-Var.',
+    }
+    _e2e_display = {
+        'e2e_reward_differential_sharpe': 'E2E Diff. Sharpe',
+        'e2e_reward_return': 'E2E Return',
+        'e2e_reward_sortino': 'E2E Sortino',
+        'e2e_reward_mean_variance': 'E2E Mean-Var.',
+    }
+    _metrics_info = [
+        ('sharpe', 'Sharpe Ratio'),
+        ('ann_return', 'Annualized Return'),
+        ('calmar', 'Calmar Ratio'),
+        ('max_drawdown', 'Max Drawdown'),
+    ]
+
+    fig, axes = plt.subplots(1, 4, figsize=(18, 5))
+    fig.suptitle('Figure 6: Reward Function Ablation — Full Pipeline vs E2E RL Across Reward Modes',
+                 fontsize=13, fontweight='bold')
+
+    pipe_labels = [_mode_display.get(lbl, lbl) for lbl in reward_data['label']]
+    pipe_colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
+
+    for ax, (metric, metric_title) in zip(axes, _metrics_info):
+        if metric not in reward_data.columns:
+            ax.set_title(metric_title)
+            ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+            continue
+
+        pipe_vals = reward_data[metric].values.astype(float)
+        x = np.arange(len(pipe_labels))
+        bars = ax.bar(
+            x - 0.2, pipe_vals,
+            width=0.35,
+            color=pipe_colors[:len(pipe_vals)],
+            alpha=0.85,
+            edgecolor='black',
+            label='Full Pipeline',
+        )
+
+        if not e2e_data.empty and metric in e2e_data.columns:
+            e2e_vals = e2e_data[metric].values.astype(float)
+            n = min(len(pipe_vals), len(e2e_vals))
+            ax.bar(
+                x[:n] + 0.2, e2e_vals[:n],
+                width=0.35,
+                color='#F44336',
+                alpha=0.55,
+                edgecolor='black',
+                label='E2E RL (PPO)',
+                hatch='//',
+            )
+
+        # Annotate bar values
+        for rect, val in zip(bars, pipe_vals):
+            fmt = f'{val:.2f}' if metric != 'ann_return' else f'{val:.1%}'
+            if metric == 'max_drawdown':
+                fmt = f'{val:.1%}'
+            ax.text(
+                rect.get_x() + rect.get_width() / 2, rect.get_height() + abs(pipe_vals.max()) * 0.02,
+                fmt, ha='center', va='bottom', fontsize=7, rotation=0,
+            )
+
+        ax.set_title(metric_title, fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(pipe_labels, fontsize=8, rotation=15)
+        ax.axhline(0, color='black', linewidth=0.5, linestyle=':')
+        ax.grid(True, alpha=0.3, axis='y')
+        if ax is axes[0]:
+            ax.legend(fontsize=7)
+
+    plt.tight_layout()
+    plt.savefig('stock_trading/pipeline_reward_ablation.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print("Saved: stock_trading/pipeline_reward_ablation.png")
+
