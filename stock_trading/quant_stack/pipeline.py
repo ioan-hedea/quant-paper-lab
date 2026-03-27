@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sp_stats
 from sklearn.covariance import LedoitWolf
 
 from .alpha import (
@@ -140,7 +139,7 @@ def run_full_pipeline(
 
     ff = FamaFrenchFactors(prices, returns, sec_quality_scores=sec_quality_scores)
     pairs = PairsTrading(prices)
-    garch = GARCHForecaster(returns, refit_every=21)
+    garch = GARCHForecaster(returns, refit_every=63)
     hmm = HMMRegimeDetector(lookback=252)
     lstm_models = {
         t: LSTMAlpha(seq_len=20, hidden_size=8, n_features=5)
@@ -158,6 +157,10 @@ def run_full_pipeline(
 
     # Market return for regime detection
     market_ret = returns[tickers].mean(axis=1)
+
+    # Precompute rolling stats for the full series to avoid per-step recomputation
+    _market_rolling_vol = market_ret.rolling(60).std()
+    _portfolio_vol_20d = returns[tickers].rolling(20).std().mean(axis=1)
 
     # Storage
     wealth = 1.0
@@ -204,6 +207,12 @@ def run_full_pipeline(
         if ticker in returns.columns:
             lstm.train_on_window(returns, train_end, ticker, window=504)
 
+    # Caches for expensive operations that don't need daily recomputation
+    _rp_weights_cache: np.ndarray | None = None
+    _rp_last_fit: int = -999
+    _macro_belief_cache: float = 0.5
+    _macro_last_compute: int = -999
+
     print("  Running walk-forward backtest...")
     for t in range(max(252, train_end), n):
         if t % 100 == 0:
@@ -215,11 +224,14 @@ def run_full_pipeline(
         factor_scores, factor_detail = ff.get_factor_scores(t - 1)
         pairs_signals, pairs_info = pairs.get_pairs_signals(t - 1)
         garch_vols = garch.forecast_all(t - 1)
+        garch.record_avg_vol(float(garch_vols.mean()))
         regime_belief = hmm.get_regime_belief(t - 1, market_ret)
         if not macro_data.empty and dates[t - 1] in macro_data.index:
-            macro_window = macro_data.loc[:dates[t - 1]].tail(252)
-            macro_belief = compute_macro_regime_signal(macro_window)
-            regime_belief = 0.75 * regime_belief + 0.25 * macro_belief
+            if t - _macro_last_compute >= 5:
+                macro_window = macro_data.loc[:dates[t - 1]].tail(252)
+                _macro_belief_cache = compute_macro_regime_signal(macro_window)
+                _macro_last_compute = t
+            regime_belief = 0.75 * regime_belief + 0.25 * _macro_belief_cache
 
         lstm_preds = {}
         for ticker, lstm in lstm_models.items():
@@ -256,7 +268,7 @@ def run_full_pipeline(
         ))
 
         alpha_opportunity = compute_alpha_opportunity(expected, confidence)
-        portfolio_vol = returns[tickers].iloc[max(0, t - 20):t].std().mean()
+        portfolio_vol = _portfolio_vol_20d.iloc[t - 1] if t > 20 else returns[tickers].iloc[:t].std().mean()
         prev_weights = None
         if results['portfolio_weights']:
             prev_weights = pd.Series(results['portfolio_weights'][-1], index=tickers)
@@ -277,11 +289,12 @@ def run_full_pipeline(
 
         # --- RL Dynamic Hedging ---
         drawdown = (wealth - peak) / peak
-        vol_window = market_ret.iloc[max(0, t - 60):t]
-        current_vol = vol_window.std()
-        vol_percentile = sp_stats.percentileofscore(
-            market_ret.iloc[max(0, t - 252):t].rolling(60).std().dropna().values,
-            current_vol) / 100 if t > 312 else 0.5
+        current_vol = _market_rolling_vol.iloc[t] if t < len(_market_rolling_vol) else market_ret.iloc[max(0, t - 60):t].std()
+        if t > 312:
+            hist_vols = _market_rolling_vol.iloc[max(0, t - 252):t].dropna().values
+            vol_percentile = float(np.searchsorted(np.sort(hist_vols), current_vol) / (len(hist_vols) + 1e-8))
+        else:
+            vol_percentile = 0.5
         momentum = market_ret.iloc[max(0, t - 20):t].sum()
 
         hedge_state = hedging_rl.get_state(drawdown, vol_percentile, momentum)
@@ -352,17 +365,20 @@ def run_full_pipeline(
         ddlever_peak = max(ddlever_peak, ddlever_wealth)
 
         # Risk parity baseline: inverse-variance weights via Ledoit-Wolf covariance
-        rp_window = returns[tickers].iloc[max(0, t - 60):t]
-        if len(rp_window) >= 20:
-            try:
-                lw = LedoitWolf().fit(rp_window.values)
-                inv_var = 1.0 / (np.diag(lw.covariance_) + 1e-8)
-                rp_weights = inv_var / inv_var.sum()
-            except Exception:
-                rp_weights = np.ones(len(tickers)) / len(tickers)
-        else:
-            rp_weights = np.ones(len(tickers)) / len(tickers)
-        rp_ret = float(np.dot(rp_weights, daily_ret.values))
+        # Refit only every 5 days — covariance moves slowly
+        if t - _rp_last_fit >= 5 or _rp_weights_cache is None:
+            rp_window = returns[tickers].iloc[max(0, t - 60):t]
+            if len(rp_window) >= 20:
+                try:
+                    lw = LedoitWolf().fit(rp_window.values)
+                    inv_var = 1.0 / (np.diag(lw.covariance_) + 1e-8)
+                    _rp_weights_cache = inv_var / inv_var.sum()
+                except Exception:
+                    _rp_weights_cache = np.ones(len(tickers)) / len(tickers)
+            else:
+                _rp_weights_cache = np.ones(len(tickers)) / len(tickers)
+            _rp_last_fit = t
+        rp_ret = float(np.dot(_rp_weights_cache, daily_ret.values))
         riskparity_wealth *= (1 + rp_ret)
 
         # --- RL Updates ---
@@ -377,7 +393,7 @@ def run_full_pipeline(
         )
 
         next_alpha = alpha_opportunity
-        next_vol = returns[tickers].iloc[max(0, t - 19):t + 1].std().mean()
+        next_vol = _portfolio_vol_20d.iloc[t] if t < len(_portfolio_vol_20d) else portfolio_vol
         next_state = portfolio_rl.get_state(next_alpha, next_vol, regime_belief, uncertainty_score)
         if config.experiment.use_portfolio_rl:
             portfolio_rl.update(state, action, sharpe_reward, next_state)

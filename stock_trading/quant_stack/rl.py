@@ -42,6 +42,7 @@ class PortfolioConstructionRL:
         self.optimizer_config = optimizer_config or OptimizerConfig()
         self.Q = defaultdict(lambda: np.zeros(n_risk_levels))
         self.reward_buffer = deque(maxlen=60)
+        self._cov_cache: dict[int, np.ndarray] = {}  # id(returns_df) -> covariance
 
         # RL now mostly adjusts total exposure and a small active overlay
         # around a factor-anchored target book.
@@ -108,6 +109,14 @@ class PortfolioConstructionRL:
             adjusted *= target_budget / adjusted_budget
         return adjusted
 
+    def _get_cached_cov(self, returns_window: pd.DataFrame) -> np.ndarray:
+        """Compute LedoitWolf covariance once per returns window, then cache."""
+        key = id(returns_window)
+        if key not in self._cov_cache:
+            self._cov_cache.clear()  # only keep one entry
+            self._cov_cache[key] = LedoitWolf().fit(returns_window.values).covariance_
+        return self._cov_cache[key]
+
     def estimate_min_var_core(
         self,
         tickers: pd.Index,
@@ -129,7 +138,7 @@ class PortfolioConstructionRL:
             return fallback
 
         try:
-            cov = LedoitWolf().fit(returns_window.values).covariance_
+            cov = self._get_cached_cov(returns_window)
             inv_cov = np.linalg.pinv(cov + 1e-8 * np.eye(cov.shape[0]))
             ones = np.ones(inv_cov.shape[0])
             raw = inv_cov @ ones
@@ -206,7 +215,7 @@ class PortfolioConstructionRL:
             prev_book = prev_book / (prev_book.sum() + 1e-8)
 
         try:
-            cov = LedoitWolf().fit(aligned_returns.values).covariance_
+            cov = self._get_cached_cov(aligned_returns)
         except Exception:
             return base_target
 

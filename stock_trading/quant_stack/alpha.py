@@ -100,41 +100,61 @@ class PairsTrading:
     - Trade the spread when it deviates from equilibrium
     - Z-score of spread as the signal
     """
-    def __init__(self, prices, lookback=252):
+    def __init__(self, prices, lookback=252, refit_every=21):
         self.prices = prices
         self.lookback = lookback
+        self.refit_every = refit_every
+        self._cached_pairs: dict = {}
+        self._last_coint_idx: int | None = None
 
     def find_cointegrated_pairs(self, date_idx):
-        """Test all candidate pairs for cointegration."""
-        pairs_info = {}
+        """Test all candidate pairs for cointegration. Refits only every `refit_every` days."""
         if date_idx < self.lookback:
-            return pairs_info
+            return {}
 
         window = self.prices.iloc[date_idx - self.lookback:date_idx + 1]
-        for t1, t2 in PAIRS_CANDIDATES:
-            if t1 not in window.columns or t2 not in window.columns:
-                continue
-            p1, p2 = window[t1].values, window[t2].values
-            score, pvalue, _ = coint(p1, p2)
-            if pvalue < 0.05:  # cointegrated at 5% level
-                # Compute hedge ratio via OLS
-                X = add_constant(p2)
-                model = OLS(p1, X).fit()
-                hedge_ratio = model.params[1]
-                spread = p1 - hedge_ratio * p2
-                spread_mean = spread.mean()
-                spread_std = spread.std()
-                zscore = (spread[-1] - spread_mean) / (spread_std + 1e-8)
 
-                pairs_info[(t1, t2)] = {
-                    'pvalue': pvalue,
-                    'hedge_ratio': hedge_ratio,
-                    'zscore': zscore,
-                    'spread': spread,
-                    'spread_mean': spread_mean,
-                    'spread_std': spread_std,
-                }
-        return pairs_info
+        # Only re-run expensive cointegration tests periodically
+        need_refit = (self._last_coint_idx is None
+                      or date_idx - self._last_coint_idx >= self.refit_every)
+
+        if need_refit:
+            self._cached_pairs = {}
+            for t1, t2 in PAIRS_CANDIDATES:
+                if t1 not in window.columns or t2 not in window.columns:
+                    continue
+                p1, p2 = window[t1].values, window[t2].values
+                score, pvalue, _ = coint(p1, p2)
+                if pvalue < 0.05:
+                    X = add_constant(p2)
+                    model = OLS(p1, X).fit()
+                    hedge_ratio = model.params[1]
+                    spread = p1 - hedge_ratio * p2
+                    spread_mean = spread.mean()
+                    spread_std = spread.std()
+                    zscore = (spread[-1] - spread_mean) / (spread_std + 1e-8)
+                    self._cached_pairs[(t1, t2)] = {
+                        'pvalue': pvalue,
+                        'hedge_ratio': hedge_ratio,
+                        'zscore': zscore,
+                        'spread': spread,
+                        'spread_mean': spread_mean,
+                        'spread_std': spread_std,
+                    }
+            self._last_coint_idx = date_idx
+        else:
+            # Only update z-scores using cached hedge ratios (cheap)
+            updated = {}
+            for (t1, t2), info in self._cached_pairs.items():
+                if t1 not in window.columns or t2 not in window.columns:
+                    continue
+                p1, p2 = window[t1].values, window[t2].values
+                spread = p1 - info['hedge_ratio'] * p2
+                zscore = (spread[-1] - info['spread_mean']) / (info['spread_std'] + 1e-8)
+                updated[(t1, t2)] = {**info, 'zscore': zscore, 'spread': spread}
+            self._cached_pairs = updated
+
+        return self._cached_pairs
 
     def get_pairs_signals(self, date_idx):
         """Convert cointegration z-scores into trading signals."""
@@ -205,31 +225,26 @@ class GARCHForecaster:
                 vols[ticker] = self.forecast_vol(ticker, date_idx)
         return pd.Series(vols)
 
+    def __init_vol_history(self) -> None:
+        if not hasattr(self, '_avg_vol_history'):
+            self._avg_vol_history: deque[float] = deque(maxlen=21)
+
+    def record_avg_vol(self, avg_vol: float) -> None:
+        """Record the cross-sectional average vol for uncertainty tracking."""
+        self.__init_vol_history()
+        if np.isfinite(avg_vol) and avg_vol > 0:
+            self._avg_vol_history.append(float(avg_vol))
+
     def forecast_vol_uncertainty(self, date_idx: int, lookback: int = 21) -> float:
         """
         Measure uncertainty in the GARCH vol forecast as the coefficient of
-        variation of the vol forecasts over the recent lookback window.
-        High CV means the vol forecast has been moving around a lot — the model
-        is uncertain about the current volatility regime.
+        variation of recent cross-sectional average vol forecasts.
+        Uses incrementally recorded values instead of re-calling forecast_vol.
         """
-        if date_idx < lookback + 5:
+        self.__init_vol_history()
+        if len(self._avg_vol_history) < 5:
             return 0.5
-        recent_vols = []
-        for step in range(lookback):
-            idx = date_idx - step
-            if idx < 10:
-                break
-            ticker_vols = []
-            for ticker in UNIVERSE:
-                if ticker in self.returns.columns:
-                    v = self.forecast_vol(ticker, idx)
-                    if np.isfinite(v) and v > 0:
-                        ticker_vols.append(v)
-            if ticker_vols:
-                recent_vols.append(float(np.mean(ticker_vols)))
-        if len(recent_vols) < 5:
-            return 0.5
-        arr = np.array(recent_vols, dtype=float)
+        arr = np.array(self._avg_vol_history, dtype=float)
         cv = arr.std() / (arr.mean() + 1e-8)
         return float(np.clip(cv / 0.5, 0.0, 1.0))
 
@@ -241,13 +256,16 @@ class HMMRegimeDetector:
     Simple 2-state Hidden Markov Model for bull/bear regime detection.
     Uses EM algorithm on market returns.
     """
-    def __init__(self, n_states=2, lookback=252):
+    def __init__(self, n_states=2, lookback=252, refit_every=5):
         self.n_states = n_states
         self.lookback = lookback
+        self.refit_every = refit_every
         self.means = None
         self.stds = None
         self.transition = None
         self.beliefs = None
+        self._last_fit_idx: int | None = None
+        self._cached_belief: float = 0.5
 
     def fit(self, returns_series):
         """Fit HMM using simple EM on a window of returns."""
@@ -262,21 +280,19 @@ class HMMRegimeDetector:
 
         # EM iterations
         for _ in range(20):
-            # E-step: forward-backward
+            # E-step: vectorized forward pass
             gamma = self._forward_backward(data)
 
-            # M-step
+            # M-step (vectorized)
             for k in range(K):
                 w = gamma[:, k]
                 w_sum = w.sum() + 1e-8
                 self.means[k] = (w * data).sum() / w_sum
                 self.stds[k] = np.sqrt((w * (data - self.means[k]) ** 2).sum() / w_sum + 1e-8)
 
-                for j in range(K):
-                    num = 0
-                    for t in range(n - 1):
-                        num += gamma[t, k] * self._emission(data[t + 1], j)
-                    self.transition[k, j] = num + 1e-8
+                # Vectorized transition update
+                emission_next = self._emission_vec(data[1:])  # (n-1, K)
+                self.transition[k] = (gamma[:-1, k][:, None] * emission_next).sum(axis=0) + 1e-8
                 self.transition[k] /= self.transition[k].sum()
 
         # Sort so state 0 = bull (higher mean)
@@ -288,35 +304,51 @@ class HMMRegimeDetector:
         self.beliefs = gamma[-1]
         return self
 
-    def _emission(self, x, k):
-        return sp_stats.norm.pdf(x, self.means[k], self.stds[k]) + 1e-300
+    def _emission_vec(self, x: np.ndarray) -> np.ndarray:
+        """Vectorized emission: returns (len(x), K) array of emission probs."""
+        K = self.n_states
+        x = np.asarray(x)
+        if x.ndim == 0:
+            x = x.reshape(1)
+        result = np.empty((len(x), K))
+        for k in range(K):
+            result[:, k] = sp_stats.norm.pdf(x, self.means[k], self.stds[k]) + 1e-300
+        return result
 
     def _forward_backward(self, data):
         n = len(data)
         K = self.n_states
         alpha = np.zeros((n, K))
 
-        # Forward
-        for k in range(K):
-            alpha[0, k] = self._emission(data[0], k) / K
+        # Precompute all emissions at once: (n, K)
+        emissions = self._emission_vec(data)
+
+        # Forward pass — vectorized (no inner Python loop over states)
+        alpha[0] = emissions[0] / K
         alpha[0] /= alpha[0].sum() + 1e-300
 
         for t in range(1, n):
-            for k in range(K):
-                alpha[t, k] = self._emission(data[t], k) * sum(
-                    alpha[t - 1, j] * self.transition[j, k] for j in range(K))
+            alpha[t] = emissions[t] * (alpha[t - 1] @ self.transition)
             alpha[t] /= alpha[t].sum() + 1e-300
 
         return alpha  # use forward probs as approximate posterior
 
     def get_regime_belief(self, date_idx, market_returns):
-        """Return P(bull) at a given date."""
+        """Return P(bull) at a given date. Refits only every `refit_every` days."""
         if date_idx < self.lookback:
             return 0.5
 
+        # Use cached result if refit not due
+        if (self._last_fit_idx is not None
+                and date_idx - self._last_fit_idx < self.refit_every
+                and self.beliefs is not None):
+            return self._cached_belief
+
         window = market_returns.iloc[max(0, date_idx - self.lookback):date_idx + 1]
         self.fit(window)
-        return self.beliefs[0]  # P(bull)
+        self._last_fit_idx = date_idx
+        self._cached_belief = float(self.beliefs[0])
+        return self._cached_belief
 
 
 # --- 2E. LSTM Return Predictor (Pure Numpy) ---
