@@ -4,9 +4,107 @@
 
 ---
 
+## 0. Research Status Snapshot
+
+This section converts the roadmap into a status-aware plan. The goal is to
+separate what is already in the codebase from what is only in the paper plan or
+still needs to be built.
+
+### 0.1 Already Implemented in Code
+
+- RL is framed as a **control layer**, not a raw alpha generator
+- Core architecture in code and report: alpha layer, constrained allocator, RL control, hedge layer, execution/cost layer
+- Baselines:
+  - factor-only
+  - equal-weight
+  - volatility targeting
+  - drawdown-based deleveraging
+  - end-to-end RL baseline (PPO)
+- Ablations:
+  - factor-only
+  - alpha stack without RL
+  - alpha plus portfolio RL
+  - alpha plus hedge RL
+  - full pipeline
+- Robustness engine:
+  - multiple overlapping rolling windows
+  - transaction-cost sensitivity
+  - rebalance-band sensitivity
+  - hedge-intensity sensitivity
+  - macro-lag sensitivity
+  - reward-function ablation
+- Statistical reliability:
+  - block-bootstrap confidence intervals
+  - pairwise bootstrap significance tables
+- Behavioral analysis:
+  - regime-conditioned exposure, hedge ratio, cash, turnover, and returns
+- Financial realism:
+  - lagged macro features
+  - explicit no-lookahead timing contract
+  - fixed + volatility-scaled + size-sensitive transaction costs
+  - long-only allocator
+  - turnover penalty
+  - position caps / group caps
+- Data and state enrichment:
+  - FRED macro series including `VIX`, `HY OAS`, `DXY`
+  - uncertainty features including alpha dispersion, regime entropy, and IC instability
+- Research artifact export:
+  - CSV metrics
+  - JSON summaries
+  - paper-ready tables
+  - summary figures
+
+### 0.2 Partially Implemented or Waiting on Final Evidence
+
+- Central hypotheses are now structurally testable, but the paper still needs
+  fresh completed runs to report the new evidence cleanly
+- H1: RL improves downside risk vs factor-only
+- H2: RL outperforms rule-based risk overlays
+- H3: Modular RL outperforms end-to-end RL
+- The report now discusses these explicitly, but the main results tables still
+  need to be refreshed with the latest research-run outputs
+- Additional metrics are mixed:
+  - worst 5\% daily return / VaR-style tail metric is already present
+  - downside deviation is indirectly present through Sortino
+  - hedge cost vs benefit is partly available through hedge PnL logs but not yet
+    elevated to a first-class results table
+
+### 0.3 Not Yet Implemented
+
+- H4 / RQ4: option-based hedging improves realism and effectiveness
+- Real options sleeve:
+  - protective put
+  - collar
+  - optional put spread
+- RL choosing hedge **type** in addition to hedge intensity
+- Options features:
+  - implied volatility term structure
+  - IV percentile
+  - richer option-cost inputs
+- Fully point-in-time fundamentals from SEC filing dates
+- Drawdown duration as a reported headline metric
+- Formal Sharpe-ratio comparison tests beyond bootstrap summaries
+
+### 0.4 Immediate Paper Upgrade Priority
+
+These are the highest-value next steps for turning the project from a strong
+prototype into a stronger research artifact.
+
+1. Finish one full research run with the new evaluation stack and update the
+   report tables/figures from actual artifacts.
+2. Surface the rule-based and end-to-end baselines as first-class evidence in
+   the main paper, not only in generated CSVs.
+3. Add a compact status-aware subsection for RQ4 as future work, rather than
+   pretending options integration already exists.
+4. Promote hedge cost/benefit and drawdown-duration metrics if the current runs
+   support them cleanly.
+
+---
+
 ## 1. Research Questions
 
-The paper should be organized around three explicit, testable research questions.
+The paper should be organized around three explicit, testable research questions,
+with a fourth extension reserved for the next realism upgrade.
 
 ### RQ1 — Architecture: Controller vs. End-to-End
 
@@ -25,6 +123,22 @@ This is the "is RL actually doing something nontrivial?" test. Without it, a rev
 > Which component of RL control — exposure modulation, dynamic hedging, or their joint operation — is the primary driver of the observed risk transformation?
 
 This is already partially addressed by the existing ablation table, but needs to be sharpened. The current results suggest hedging contributes more than portfolio RL alone — that's an important finding that should be stated as a formal result rather than an observation.
+
+### RQ4 — Option-Based Hedging Realism (Stretch Goal)
+
+> Does replacing the stylized convex hedge sleeve with explicit option-based hedging improve realism and downside protection enough to justify the added complexity?
+
+This should be treated as a second-wave research question rather than a blocker
+for the current paper. It is high value, but also meaningfully higher effort
+than the current stock-and-overlay architecture.
+
+### Working Hypotheses
+
+- **H1:** RL improves downside risk relative to factor-only.
+- **H2:** RL outperforms rule-based risk overlays on at least some risk-adjusted metrics.
+- **H3:** Modular RL outperforms end-to-end RL in robustness and interpretability.
+- **H4:** Option-based hedging improves realism and potentially protection, but
+  it remains untested in the current codebase.
 
 ---
 
@@ -95,16 +209,16 @@ Thresholds calibrated to be reasonable, not optimized on the test set.
 
 ### 3.5 Updated Benchmark Summary
 
-| Benchmark | Tests | Priority | Effort |
-|-----------|-------|----------|--------|
-| SPY buy-and-hold | Baseline | Already done | — |
-| Equal weight | Universe effect | Already done | — |
-| Factor-only | Alpha value | Already done | — |
-| Factor + constrained optimizer (no RL) | Optimizer value | Already done | — |
-| **Vol-targeting on factor portfolio** | RQ2 | **Required** | Half day |
-| **Drawdown-based deleveraging** | RQ2 | **Required** | Half day |
-| **End-to-end RL (PPO/DQN)** | RQ1 | **Required** | 1–2 days |
-| Risk parity / min-variance | Diversification reference | Nice to have | Half day |
+| Benchmark | Tests | Priority | Status | Effort |
+|-----------|-------|----------|--------|--------|
+| SPY buy-and-hold | Baseline | Already done | Implemented | — |
+| Equal weight | Universe effect | Already done | Implemented | — |
+| Factor-only | Alpha value | Already done | Implemented | — |
+| Factor + constrained optimizer (no RL) | Optimizer value | Already done | Implemented | — |
+| **Vol-targeting on factor portfolio** | RQ2 | **Required** | Implemented | Half day |
+| **Drawdown-based deleveraging** | RQ2 | **Required** | Implemented | Half day |
+| **End-to-end RL (PPO/DQN)** | RQ1 | **Required** | Implemented, expensive to run | 1–2 days |
+| Risk parity / min-variance | Diversification reference | Nice to have | Partially implemented via min-var stabilizer / risk-parity path | Half day |
 
 ---
 
@@ -212,6 +326,54 @@ Check the adaptive combiner weights for the pairs sleeve. If it's consistently l
 - At minimum: report standard errors on Sharpe and Calmar estimates
 
 This doesn't need to be heavy — even bootstrap confidence intervals on Sharpe would elevate the paper significantly.
+
+**Status update:** Block-bootstrap confidence intervals and pairwise bootstrap
+significance summaries are now implemented in the evaluation engine. What
+remains is to promote those outputs into the main empirical narrative of the
+paper once a full research run completes.
+
+### 5.6 Additional Metrics
+
+The checklist suggests a few additional metrics that are worth splitting into
+``already available'' versus ``still worth adding.''
+
+**Already available or effectively covered**
+- Tail risk via the worst 5\% daily return / VaR-style reporting
+- Downside deviation via the Sortino ratio
+
+**Worth adding next**
+- Explicit hedge cost versus hedge benefit summary
+- Drawdown duration as a reported metric
+- Possibly a more explicit downside semi-variance table in the paper
+
+These are good additions because they strengthen the downside-control story
+without changing the architecture.
+
+### 5.7 Options Integration (Stretch RQ4)
+
+This is the biggest realism upgrade still missing from the current codebase.
+
+**Goal**
+- Replace the stylized convex hedge sleeve with explicit option-based hedging
+
+**Minimal strategy set**
+- Protective put
+- Collar
+- Optional put spread
+
+**RL extension**
+- Let RL select both hedge type and hedge intensity
+
+**Additional features needed**
+- Implied volatility
+- IV percentile
+- Volatility regime / term structure context
+
+**Status**
+- Not implemented
+- High-value future work
+- Should be framed in the plan as a second-phase extension, not as a missing
+  piece that invalidates the current paper
 
 ---
 

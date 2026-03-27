@@ -1,0 +1,60 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{neurips_2025}[2026/03/27 Local NeurIPS-style preprint template]
+
+\newif\if@neuripsfinal
+\newif\if@neuripspreprint
+\newif\if@neuripsnonatbib
+\@neuripsfinalfalse
+\@neuripspreprintfalse
+\@neuripsnonatbibfalse
+
+\DeclareOption{final}{\@neuripsfinaltrue}
+\DeclareOption{preprint}{\@neuripspreprinttrue}
+\DeclareOption{nonatbib}{\@neuripsnonatbibtrue}
+\ProcessOptions\relax
+
+\RequirePackage[letterpaper,margin=1in]{geometry}
+\RequirePackage{times}
+\RequirePackage{microtype}
+\RequirePackage{titlesec}
+\if@neuripsnonatbib\else
+  \RequirePackage[numbers,sort&compress]{natbib}
+\fi
+
+\setlength{\parindent}{1em}
+\setlength{\parskip}{3pt}
+\linespread{1.03}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{0.8em}{}
+\titlespacing*{\section}{0pt}{18pt}{6pt}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.8em}{}
+\titlespacing*{\subsection}{0pt}{12pt}{4pt}
+
+\makeatletter
+\newcommand{\@neuripsnoticestring}{%
+  \if@neuripsfinal
+    Published using a NeurIPS-style conference template.
+  \else
+    Preprint prepared in a NeurIPS-style conference template.
+  \fi
+}
+
+\renewcommand{\maketitle}{%
+  \begin{center}%
+    {\LARGE\bfseries \@title \par}%
+    \vskip 1em%
+    {\large \lineskip .5em%
+      \begin{tabular}[t]{c}\@author\end{tabular}\par}%
+    \vskip 0.6em%
+    {\small \@neuripsnoticestring\par}%
+  \end{center}%
+  \vskip 1.25em%
+}
+
+\renewenvironment{abstract}
+  {\centerline{\bfseries Abstract}\begin{quote}\small}
+  {\end{quote}\vskip 1em}
+
+\newcommand{\And}{\end{tabular}\hfil\linebreak[0]\hfil\begin{tabular}[t]{c}}
+\newcommand{\AND}{\end{tabular}\hfil\linebreak[4]\hfil\begin{tabular}[t]{c}}
+\makeatother

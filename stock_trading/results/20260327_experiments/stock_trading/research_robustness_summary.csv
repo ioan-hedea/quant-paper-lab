@@ -1,0 +1,2 @@
+rolling_window_count,median_full_sharpe,median_full_calmar,median_full_max_drawdown,frac_full_beats_spy_sharpe,frac_full_beats_spy_calmar,frac_full_beats_factor_drawdown,frac_full_beats_factor_calmar
+6.0,1.3237643880496193,2.5469420762927966,-0.07177426602467103,0.8333333333333334,1.0,0.6666666666666666,0.16666666666666666

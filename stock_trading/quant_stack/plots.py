@@ -105,14 +105,13 @@ def plot_alpha_models(results, prices, returns):
 
     # 7. Hedging actions
     ax = fig.add_subplot(gs[2, 0])
-    hedge_actions = np.array(results['hedge_actions'])
-    hedge_ratios = results['hedging_rl'].hedge_ratios
-    actual_hedge = np.array([hedge_ratios[min(a, len(hedge_ratios)-1)] for a in hedge_actions])
+    actual_hedge = np.array(results.get('effective_hedge_ratios', results.get('hedge_ratios', [])))
     ax.fill_between(dates, actual_hedge, 0, color='#F44336', alpha=0.4)
     ax.plot(dates, actual_hedge, color='#F44336', linewidth=0.8)
-    ax.set_title('Dynamic Hedge Ratio (RL)')
+    ax.set_title('Effective Option Hedge Ratio (RL)')
     ax.set_ylabel('Hedge Fraction')
-    ax.set_ylim(0, max(0.2, max(hedge_ratios) * 1.2))
+    ymax = max(0.2, actual_hedge.max() * 1.2) if len(actual_hedge) > 0 else 0.2
+    ax.set_ylim(0, ymax)
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     ax.tick_params(axis='x', rotation=45)
@@ -128,16 +127,32 @@ def plot_alpha_models(results, prices, returns):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     ax.tick_params(axis='x', rotation=45)
 
-    # 9. Correlation matrix (recent)
+    # 9. Option / IV feature stack
     ax = fig.add_subplot(gs[2, 2])
-    recent_corr = returns[tickers[-10:]].iloc[-60:].corr()
-    im = ax.imshow(recent_corr.values, cmap='RdYlGn_r', vmin=-1, vmax=1)
-    ax.set_xticks(range(len(recent_corr)))
-    ax.set_xticklabels(recent_corr.columns, fontsize=6, rotation=45)
-    ax.set_yticks(range(len(recent_corr)))
-    ax.set_yticklabels(recent_corr.columns, fontsize=6)
-    ax.set_title('Recent Correlation Matrix (60d)')
-    plt.colorbar(im, ax=ax, shrink=0.8)
+    iv_ann = np.array(results.get('iv_annualized', []), dtype=float)
+    realized_vol = np.array(results.get('garch_vol_uncertainty', []), dtype=float)
+    iv_pct = np.array(results.get('iv_percentile', []), dtype=float)
+    if len(iv_ann) == len(dates) and len(iv_ann) > 0:
+        ax.plot(dates, iv_ann * 100, color='#6A1B9A', linewidth=1.5, label='Implied vol proxy')
+        ax2 = ax.twinx()
+        ax2.plot(dates, iv_pct, color='#009688', linewidth=1.0, alpha=0.8, label='IV percentile')
+        ax.set_title('Option Feature Stack: IV Level and Percentile')
+        ax.set_ylabel('IV annualized (%)', color='#6A1B9A')
+        ax2.set_ylabel('IV percentile', color='#009688')
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.tick_params(axis='x', rotation=45)
+        ax.legend(loc='upper left', fontsize=7)
+        ax2.legend(loc='upper right', fontsize=7)
+    else:
+        recent_corr = returns[tickers[-10:]].iloc[-60:].corr()
+        im = ax.imshow(recent_corr.values, cmap='RdYlGn_r', vmin=-1, vmax=1)
+        ax.set_xticks(range(len(recent_corr)))
+        ax.set_xticklabels(recent_corr.columns, fontsize=6, rotation=45)
+        ax.set_yticks(range(len(recent_corr)))
+        ax.set_yticklabels(recent_corr.columns, fontsize=6)
+        ax.set_title('Recent Correlation Matrix (60d)')
+        plt.colorbar(im, ax=ax, shrink=0.8)
 
     plt.savefig('stock_trading/pipeline_alpha_models.png', dpi=150, bbox_inches='tight')
     plt.show()
@@ -298,6 +313,7 @@ def plot_rl_analysis(results):
     dates = results['dates']
     actions = np.array(results['actions'])
     hedge_actions = np.array(results['hedge_actions'])
+    hedge_type_actions = np.array(results.get('hedge_type_actions', []))
     beliefs = np.array(results['regime_beliefs'])
     dd = np.array(results['drawdowns'])
 
@@ -323,8 +339,7 @@ def plot_rl_analysis(results):
 
     # 2. Hedge ratio vs drawdown
     ax = axes[0, 1]
-    hedge_ratios_vals = results['hedging_rl'].hedge_ratios
-    actual_hedge = np.array([hedge_ratios_vals[min(a, len(hedge_ratios_vals)-1)] for a in hedge_actions])
+    actual_hedge = np.array(results.get('effective_hedge_ratios', results.get('hedge_ratios', [])))
     ax.plot(dates, dd, color='#F44336', linewidth=1, alpha=0.6, label='Drawdown')
     ax2 = ax.twinx()
     ax2.fill_between(dates, actual_hedge, 0, color='#4CAF50', alpha=0.3, label='Hedge')
@@ -380,29 +395,32 @@ def plot_rl_analysis(results):
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # 5. Hedge action distribution by vol regime
+    # 5. Hedge type distribution by IV regime
     ax = axes[1, 1]
-    garch_arr = np.array(results['garch_vols'])
-    avg_vol = garch_arr.mean(axis=1) if garch_arr.ndim > 1 else garch_arr
-    vol_med = np.median(avg_vol)
-    high_vol = avg_vol > vol_med
-    low_vol = ~high_vol
+    iv_pct = np.array(results.get('iv_percentile', []), dtype=float)
+    if len(iv_pct) == 0:
+        garch_arr = np.array(results['garch_vols'])
+        avg_vol = garch_arr.mean(axis=1) if garch_arr.ndim > 1 else garch_arr
+        iv_pct = (avg_vol > np.median(avg_vol)).astype(float)
+    high_iv = iv_pct > np.median(iv_pct)
+    low_iv = ~high_iv
 
-    x = np.arange(4)
-    hedge_names = [f'{h:.0%}' for h in results['hedging_rl'].hedge_ratios]
+    type_names = results['hedging_rl'].get_type_labels()
+    x = np.arange(len(type_names))
     for i, (mask, name, color) in enumerate([
-        (low_vol, 'Low Vol', '#4CAF50'),
-        (high_vol, 'High Vol', '#F44336'),
+        (low_iv, 'Low IV', '#4CAF50'),
+        (high_iv, 'High IV', '#F44336'),
     ]):
         if mask.sum() > 0:
-            counts = np.bincount(hedge_actions[mask], minlength=4)[:4] / mask.sum()
+            actions_for_mask = hedge_type_actions[mask] if len(hedge_type_actions) == len(mask) else np.zeros(mask.sum(), dtype=int)
+            counts = np.bincount(actions_for_mask, minlength=len(type_names))[:len(type_names)] / mask.sum()
             ax.bar(x + i * 0.35, counts, 0.35, color=color,
                    alpha=0.8, label=name, edgecolor='black')
 
     ax.set_xticks(x + 0.175)
-    ax.set_xticklabels(hedge_names)
+    ax.set_xticklabels(type_names, rotation=15, fontsize=8)
     ax.set_ylabel('Frequency')
-    ax.set_title('Hedge Distribution by Volatility Regime')
+    ax.set_title('Option Hedge Type by IV Regime')
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -443,7 +461,7 @@ def plot_rl_analysis(results):
         f"  Rebalance Band: reduce turnover drag",
         f"  HMM: regime-aware allocation",
         f"  RL Portfolio: dynamic risk budget",
-        f"  RL Hedging: stress-profiting protection",
+        f"  RL Hedging: option type + intensity selection",
     ]
 
     for i, line in enumerate(lines):
@@ -772,4 +790,3 @@ def plot_reward_ablation(metrics_df: pd.DataFrame) -> None:
     plt.savefig('stock_trading/pipeline_reward_ablation.png', dpi=150, bbox_inches='tight')
     plt.close(fig)
     print("Saved: stock_trading/pipeline_reward_ablation.png")
-

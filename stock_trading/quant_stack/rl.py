@@ -10,7 +10,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 
-from .config import OptimizerConfig, TICKER_TO_GROUP
+from .config import OptimizerConfig, OptionOverlayConfig, TICKER_TO_GROUP
 
 class PortfolioConstructionRL:
     """
@@ -65,17 +65,17 @@ class PortfolioConstructionRL:
         uncertainty_bin = int(np.clip(np.digitize(uncertainty_score, [0.20, 0.35, 0.55, 0.75]), 0, 4))
         return (alpha_bin, vol_bin, regime_bin, uncertainty_bin)
 
-    def select_action(self, state: tuple[int, int, int]) -> int:
+    def select_action(self, state: tuple[int, int, int, int]) -> int:
         if np.random.random() < self.epsilon:
             return np.random.randint(self.n_risk_levels)
         return int(np.argmax(self.Q[state]))
 
     def update(
         self,
-        state: tuple[int, int, int],
+        state: tuple[int, int, int, int],
         action: int,
         reward: float,
-        next_state: tuple[int, int, int],
+        next_state: tuple[int, int, int, int],
     ) -> None:
         best_next = np.max(self.Q[next_state])
         td = reward + self.gamma * best_next - self.Q[state][action]
@@ -423,18 +423,14 @@ class ExecutionRL:
 
 class DynamicHedgingRL:
     """
-    RL agent for dynamic tail-risk hedging.
-    Decides how much of the portfolio to hedge via a protective overlay
-    based on current risk regime.
+    RL agent for dynamic option-based tail-risk hedging.
 
-    This approximates an options-like payoff without requiring an options
-    chain in the base demo:
-    - In calm markets: stay fully invested
-    - In stressed markets: dynamically increase hedge
-    - After crash: remove hedge to capture recovery
+    The policy chooses both:
+    - hedge type: protective put, collar, or put spread
+    - hedge intensity: 0%, 3%, 8%, 15%
 
-    State: (portfolio drawdown, vol regime, momentum regime)
-    Action: hedge ratio (0%, 3%, 8%, 15%)
+    State: (portfolio drawdown, vol regime, momentum regime,
+            implied-vol percentile, IV minus realized-vol spread)
     """
     def __init__(
         self,
@@ -442,28 +438,59 @@ class DynamicHedgingRL:
         gamma: float = 0.95,
         epsilon: float = 0.15,
         hedge_ratios: Sequence[float] | None = None,
+        hedge_types: Sequence[str] | None = None,
+        option_overlay_config: OptionOverlayConfig | None = None,
     ) -> None:
-        self.n_actions = 4
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
-        self.Q = defaultdict(lambda: np.zeros(self.n_actions))
-        # Keep the hedge sleeve light so it protects in stress without
-        # dominating performance in normal markets.
         self.hedge_ratios = list(hedge_ratios or (0.0, 0.03, 0.08, 0.15))
+        self.hedge_types = list(hedge_types or ('protective_put', 'collar', 'put_spread'))
+        self.option_overlay_config = option_overlay_config or OptionOverlayConfig()
+        self.n_ratio_actions = len(self.hedge_ratios)
+        self.n_type_actions = len(self.hedge_types)
+        self.n_actions = self.n_ratio_actions * self.n_type_actions
+        self.Q = defaultdict(lambda: np.zeros(self.n_actions))
         self.portfolio_peak = 1.0
         self.reward_buffer = deque(maxlen=60)
 
-    def get_state(self, drawdown: float, vol_percentile: float, momentum: float) -> tuple[int, int, int]:
+    def get_state(
+        self,
+        drawdown: float,
+        vol_percentile: float,
+        momentum: float,
+        iv_percentile: float = 0.5,
+        iv_realized_spread: float = 0.0,
+    ) -> tuple[int, int, int, int, int]:
         dd_bin = int(np.clip(np.digitize(-drawdown, [0.05, 0.10, 0.16, 0.24]), 0, 4))
         vol_bin = int(np.clip(np.digitize(vol_percentile, [0.50, 0.70, 0.85, 0.95]), 0, 4))
         mom_bin = int(np.clip(np.digitize(momentum, [-0.08, -0.03, 0.0, 0.04]), 0, 4))
-        return (dd_bin, vol_bin, mom_bin)
+        iv_bin = int(np.clip(np.digitize(iv_percentile, [0.40, 0.60, 0.80, 0.92]), 0, 4))
+        spread_bin = int(np.clip(np.digitize(iv_realized_spread, [-0.04, 0.0, 0.05, 0.12]), 0, 4))
+        return (dd_bin, vol_bin, mom_bin, iv_bin, spread_bin)
 
-    def select_action(self, state: tuple[int, int, int]) -> int:
+    def select_action(self, state: tuple[int, int, int, int, int]) -> int:
         if np.random.random() < self.epsilon:
             return np.random.randint(self.n_actions)
         return int(np.argmax(self.Q[state]))
+
+    def decode_action(self, action: int) -> tuple[int, int]:
+        type_idx = int(action // self.n_ratio_actions)
+        ratio_idx = int(action % self.n_ratio_actions)
+        type_idx = int(np.clip(type_idx, 0, self.n_type_actions - 1))
+        ratio_idx = int(np.clip(ratio_idx, 0, self.n_ratio_actions - 1))
+        return type_idx, ratio_idx
+
+    def get_type_labels(self) -> list[str]:
+        return [hedge_type.replace('_', ' ').title() for hedge_type in self.hedge_types]
+
+    def get_joint_action_labels(self) -> list[str]:
+        labels: list[str] = []
+        for hedge_type in self.hedge_types:
+            prefix = hedge_type.replace('_', ' ').title()
+            for hedge_ratio in self.hedge_ratios:
+                labels.append(f'{prefix} {hedge_ratio:.0%}')
+        return labels
 
     def compute_reward(
         self,
@@ -500,39 +527,127 @@ class DynamicHedgingRL:
             return portfolio_return * 100
         return portfolio_return * 200
 
+    def _effective_hedge_ratio(
+        self,
+        hedge_ratio: float,
+        vol_percentile: float,
+        drawdown: float,
+        momentum: float,
+        iv_percentile: float,
+    ) -> float:
+        stress_multiplier = (
+            0.70
+            + 0.25 * float(vol_percentile > 0.70)
+            + 0.20 * float(drawdown < -0.06)
+            + 0.15 * float(momentum < -0.02)
+            + 0.15 * float(iv_percentile > 0.75)
+        )
+        return float(np.clip(
+            hedge_ratio * stress_multiplier,
+            0.0,
+            self.option_overlay_config.max_effective_hedge,
+        ))
+
     def apply_hedge(
         self,
         risky_ret: float,
         cash_ret: float,
         market_ret: float,
+        hedge_type: str,
         hedge_ratio: float,
         vol_percentile: float,
+        iv_annualized: float,
+        iv_percentile: float,
+        iv_realized_spread: float,
         drawdown: float = 0.0,
         momentum: float = 0.0,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, dict[str, float | str]]:
         """
-        Protective sleeve:
-        - hedged notional offsets some market beta
-        - a convex bonus helps in sharper selloffs
-        - carry cost bleeds slowly in calm periods
+        Approximate daily PnL for simple option overlays.
+
+        The sleeve treats VIX-derived implied vol as the option-pricing driver
+        and applies daily theta plus downside payoff approximations. This is
+        still stylized, but it is much closer to an explicit options sleeve than
+        the prior pure convex-bonus hedge.
         """
-        stress_gate = float((vol_percentile > 0.75) or (market_ret < -0.012) or (drawdown < -0.06))
-        crash_overlay = np.clip(max(-drawdown - 0.06, 0.0) * 0.5 + max(-momentum - 0.02, 0.0) * 1.2, 0.0, 0.10)
-        effective_hedge = min(0.35, hedge_ratio * (0.40 + 0.60 * stress_gate) + crash_overlay)
-        vol_target_scale = np.clip(1.05 - 0.45 * max(vol_percentile - 0.55, 0.0), 0.65, 1.0)
-        protected_risky_ret = risky_ret * (1 - 0.45 * effective_hedge) * vol_target_scale
-        carry_cost = effective_hedge * 0.00012
-        convexity_bonus = max(-market_ret - 0.015, 0.0) * effective_hedge * (1.0 + 0.35 * vol_percentile)
-        hedge_pnl = (-effective_hedge * market_ret) + convexity_bonus - carry_cost
-        total_ret = protected_risky_ret + cash_ret + hedge_pnl
-        return total_ret, hedge_pnl
+        overlay_type = hedge_type if hedge_ratio > 1e-8 else 'none'
+        effective_hedge = self._effective_hedge_ratio(
+            hedge_ratio, vol_percentile, drawdown, momentum, iv_percentile,
+        )
+        if overlay_type == 'none' or effective_hedge <= 1e-8:
+            total_ret = risky_ret + cash_ret
+            return total_ret, {
+                'hedge_pnl': 0.0,
+                'hedge_cost': 0.0,
+                'hedge_benefit': 0.0,
+                'effective_hedge_ratio': 0.0,
+                'hedge_type': 'none',
+            }
+
+        cfg = self.option_overlay_config
+        iv_annualized = float(np.clip(iv_annualized, 0.08, 0.90))
+        iv_day = iv_annualized / np.sqrt(252.0)
+        theta_daily = effective_hedge * iv_day * cfg.theta_premium_scale * (0.85 + 0.65 * iv_percentile)
+        downside_move = max(-market_ret, 0.0)
+        upside_move = max(market_ret, 0.0)
+        downside_boost = 1.0 + 0.35 * vol_percentile + 0.25 * max(iv_realized_spread, 0.0)
+        put_strike = cfg.put_strike_otm
+        call_strike = cfg.call_strike_otm
+        spread_width = cfg.spread_width
+
+        payoff = 0.0
+        carry_credit = 0.0
+        upside_giveup = 0.0
+
+        if overlay_type == 'protective_put':
+            payoff = (
+                effective_hedge
+                * cfg.convexity_scale
+                * max(downside_move - put_strike, 0.0)
+                * downside_boost
+            )
+        elif overlay_type == 'collar':
+            payoff = (
+                effective_hedge
+                * 0.95
+                * max(downside_move - put_strike, 0.0)
+                * downside_boost
+            )
+            carry_credit = theta_daily * cfg.collar_financing_ratio
+            upside_giveup = (
+                effective_hedge
+                * 0.80
+                * max(upside_move - call_strike, 0.0)
+                * (0.85 + 0.30 * iv_percentile)
+            )
+        elif overlay_type == 'put_spread':
+            raw_spread_payoff = max(downside_move - put_strike, 0.0)
+            payoff = (
+                effective_hedge
+                * 1.10
+                * min(raw_spread_payoff, spread_width)
+                * downside_boost
+            )
+            theta_daily *= 0.70
+
+        hedge_cost = theta_daily + upside_giveup
+        hedge_benefit = payoff + carry_credit
+        hedge_pnl = hedge_benefit - hedge_cost
+        total_ret = risky_ret + cash_ret + hedge_pnl
+        return total_ret, {
+            'hedge_pnl': float(hedge_pnl),
+            'hedge_cost': float(hedge_cost),
+            'hedge_benefit': float(hedge_benefit),
+            'effective_hedge_ratio': float(effective_hedge),
+            'hedge_type': overlay_type,
+        }
 
     def update(
         self,
-        state: tuple[int, int, int],
+        state: tuple[int, int, int, int, int],
         action: int,
         reward: float,
-        next_state: tuple[int, int, int],
+        next_state: tuple[int, int, int, int, int],
     ) -> None:
         best_next = np.max(self.Q[next_state])
         td = reward + self.gamma * best_next - self.Q[state][action]
@@ -673,6 +788,7 @@ def build_e2e_features(
     garch_vols_fn: callable,
     regime_belief_fn: callable,
     macro_belief_fn: callable,
+    option_features_fn: callable | None = None,
 ) -> callable:
     """
     Build a feature function for the end-to-end environment.
@@ -729,6 +845,12 @@ def build_e2e_features(
         # Global features
         regime = regime_belief_fn(t)
         macro = macro_belief_fn(t)
+        option_feats = option_features_fn(t) if option_features_fn is not None else {
+            'iv_annualized': 0.20,
+            'iv_percentile': 0.50,
+            'iv_realized_spread': 0.0,
+            'iv_regime_score': 0.50,
+        }
         p = float(np.clip(regime, 1e-6, 1.0 - 1e-6))
         regime_entropy = float(-(p * np.log(p) + (1.0 - p) * np.log(1.0 - p)) / np.log(2.0))
         alpha_dispersion = float(np.tanh(np.std(factor_scores) / 2.0))
@@ -749,7 +871,11 @@ def build_e2e_features(
                 alpha_dispersion,
                 regime_entropy,
                 float(ic_instability[int(np.clip(t, 0, n_obs - 1))]),
-            ]),  # 7 global
+                float(option_feats.get('iv_annualized', 0.20)),
+                float(option_feats.get('iv_percentile', 0.50)),
+                float(option_feats.get('iv_realized_spread', 0.0)),
+                float(option_feats.get('iv_regime_score', 0.50)),
+            ]),  # 11 global
         ])
         return np.nan_to_num(features, nan=0.0, posinf=1.0, neginf=-1.0)
 

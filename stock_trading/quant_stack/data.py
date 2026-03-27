@@ -393,3 +393,54 @@ def compute_macro_regime_signal(macro_window: pd.DataFrame) -> float:
     weights = np.array([item[1] for item in weighted_components], dtype=float)
     regime_score = float(np.average(scores, weights=weights))
     return float(np.clip(regime_score, 0.05, 0.95))
+
+
+def build_option_overlay_features(
+    trading_index: pd.Index,
+    macro_data: pd.DataFrame,
+    market_returns: pd.Series,
+) -> pd.DataFrame:
+    """
+    Build a compact implied-volatility feature stack for the option hedge layer.
+
+    The default market-IV proxy is VIX from FRED. When unavailable, we fall back
+    to a realized-vol proxy with a modest premium.
+    """
+    features = pd.DataFrame(index=trading_index)
+    if market_returns.empty:
+        return features
+
+    realized_vol_21d = market_returns.reindex(trading_index).rolling(21, min_periods=5).std() * np.sqrt(252)
+    realized_vol_63d = market_returns.reindex(trading_index).rolling(63, min_periods=20).std() * np.sqrt(252)
+
+    if not macro_data.empty and 'vix' in macro_data.columns:
+        iv_annualized = macro_data['vix'].reindex(trading_index).ffill() / 100.0
+    else:
+        iv_annualized = (realized_vol_21d * 1.10).clip(lower=0.08, upper=0.80)
+
+    def _rolling_percentile(x: np.ndarray) -> float:
+        current = float(x[-1])
+        return float(np.mean(x <= current))
+
+    iv_percentile = (
+        iv_annualized
+        .rolling(252, min_periods=20)
+        .apply(_rolling_percentile, raw=True)
+        .clip(lower=0.0, upper=1.0)
+    )
+    iv_realized_spread = (iv_annualized - realized_vol_21d).clip(lower=-1.0, upper=1.0)
+    iv_realized_ratio = (iv_annualized / (realized_vol_21d + 1e-8) - 1.0).clip(lower=-1.0, upper=2.0)
+    iv_regime_raw = (
+        0.55 * iv_percentile.fillna(0.5) +
+        0.45 * np.tanh(np.maximum(iv_realized_spread.fillna(0.0), -0.25) / 0.20 + 0.5)
+    )
+    iv_regime_score = pd.Series(np.clip(iv_regime_raw, 0.0, 1.0), index=trading_index)
+
+    features['iv_annualized'] = iv_annualized.ffill().fillna(realized_vol_21d).fillna(0.20)
+    features['iv_percentile'] = iv_percentile.fillna(0.5)
+    features['realized_vol_21d'] = realized_vol_21d.ffill().fillna(0.18)
+    features['realized_vol_63d'] = realized_vol_63d.ffill().fillna(features['realized_vol_21d'])
+    features['iv_realized_spread'] = iv_realized_spread.fillna(0.0)
+    features['iv_realized_ratio'] = iv_realized_ratio.fillna(0.0)
+    features['iv_regime_score'] = iv_regime_score.fillna(0.5)
+    return features

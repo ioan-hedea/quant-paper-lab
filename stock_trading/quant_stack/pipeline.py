@@ -16,7 +16,7 @@ from .alpha import (
     compute_alpha_opportunity,
 )
 from .config import BENCHMARK, LSTM_TICKERS, PipelineConfig, RISK_FREE_RATE, UNIVERSE
-from .data import compute_macro_regime_signal
+from .data import build_option_overlay_features, compute_macro_regime_signal
 from .rl import DynamicHedgingRL, PortfolioConstructionRL
 
 
@@ -31,7 +31,16 @@ def _compute_transaction_cost(
     max_trade_change: float,
     portfolio_vol: float,
     config: PipelineConfig,
+    avg_daily_volume_frac: float = 0.01,
 ) -> float:
+    if config.cost_model.use_almgren_chriss:
+        # Almgren-Chriss permanent + temporary market-impact model.
+        # participation_rate approximated from turnover as fraction of ADV.
+        participation_rate = turnover * avg_daily_volume_frac
+        permanent = config.cost_model.ac_permanent_beta * participation_rate
+        temporary = (config.cost_model.ac_temporary_eta
+                     * participation_rate * portfolio_vol)
+        return float(permanent + temporary)
     base_cost = turnover * config.cost_model.base_cost_bps / 10000
     vol_cost = turnover * portfolio_vol * config.cost_model.turnover_vol_multiplier
     size_cost = max_trade_change * config.cost_model.size_penalty_bps / 10000
@@ -72,6 +81,11 @@ def _build_feature_contracts(config: PipelineConfig) -> dict[str, str]:
             f"portfolio={config.portfolio_reward_mode}, "
             f"hedge={config.hedge_reward_mode}, "
             f"e2e={config.e2e_reward_mode}"
+        ),
+        'hedge_overlay': (
+            "Option overlay RL selects hedge type and intensity using IV-aware state"
+            if config.option_overlay.use_option_overlay
+            else "Stylized non-option hedge overlay"
         ),
     }
 
@@ -139,7 +153,7 @@ def run_full_pipeline(
 
     ff = FamaFrenchFactors(prices, returns, sec_quality_scores=sec_quality_scores)
     pairs = PairsTrading(prices)
-    garch = GARCHForecaster(returns, refit_every=63)
+    garch = GARCHForecaster(returns, refit_every=21)
     hmm = HMMRegimeDetector(lookback=252)
     lstm_models = {
         t: LSTMAlpha(seq_len=20, hidden_size=8, n_features=5)
@@ -153,10 +167,15 @@ def run_full_pipeline(
         min_turnover=config.min_turnover,
         optimizer_config=config.optimizer,
     )
-    hedging_rl = DynamicHedgingRL(hedge_ratios=config.hedge_ratios)
+    hedging_rl = DynamicHedgingRL(
+        hedge_ratios=config.hedge_ratios,
+        hedge_types=config.option_overlay.hedge_types,
+        option_overlay_config=config.option_overlay,
+    )
 
     # Market return for regime detection
     market_ret = returns[tickers].mean(axis=1)
+    option_features = build_option_overlay_features(returns.index, macro_data, market_ret)
 
     # Precompute rolling stats for the full series to avoid per-step recomputation
     _market_rolling_vol = market_ret.rolling(60).std()
@@ -183,6 +202,9 @@ def run_full_pipeline(
         'portfolio_returns': [], 'cash_weights': [], 'hedge_ratios': [],
         'alpha_dispersion': [], 'regime_entropy': [], 'ic_instability': [],
         'garch_vol_uncertainty': [], 'uncertainty_score': [],
+        'hedge_type_actions': [], 'hedge_types': [],
+        'effective_hedge_ratios': [], 'hedge_costs': [], 'hedge_benefits': [],
+        'iv_annualized': [], 'iv_percentile': [], 'iv_realized_spread': [], 'iv_regime_score': [],
     }
 
     peak = 1.0
@@ -272,7 +294,10 @@ def run_full_pipeline(
         prev_weights = None
         if results['portfolio_weights']:
             prev_weights = pd.Series(results['portfolio_weights'][-1], index=tickers)
-        state = portfolio_rl.get_state(alpha_opportunity, portfolio_vol, regime_belief, uncertainty_score)
+        _vol_for_state = portfolio_vol if config.experiment.use_vol_state else 0.012
+        _regime_for_state = regime_belief if config.experiment.use_regime_state else 0.5
+        _uncert_for_state = uncertainty_score if config.experiment.use_uncertainty_state else 0.0
+        state = portfolio_rl.get_state(alpha_opportunity, _vol_for_state, _regime_for_state, _uncert_for_state)
         action = portfolio_rl.select_action(state) if config.experiment.use_portfolio_rl else (portfolio_rl.n_risk_levels - 1)
         recent_returns = returns[tickers].iloc[max(0, t - 126):t]
         weights, cash_weight = portfolio_rl.construct_portfolio(
@@ -296,25 +321,50 @@ def run_full_pipeline(
         else:
             vol_percentile = 0.5
         momentum = market_ret.iloc[max(0, t - 20):t].sum()
+        option_row = option_features.iloc[t] if not option_features.empty else pd.Series(dtype=float)
+        iv_annualized = float(option_row.get('iv_annualized', 0.20))
+        iv_percentile = float(option_row.get('iv_percentile', 0.50))
+        iv_realized_spread = float(option_row.get('iv_realized_spread', 0.0))
+        iv_regime_score = float(option_row.get('iv_regime_score', 0.50))
 
-        hedge_state = hedging_rl.get_state(drawdown, vol_percentile, momentum)
-        hedge_action = hedging_rl.select_action(hedge_state) if config.experiment.use_hedge_rl else 0
-        hedge_ratio = hedging_rl.hedge_ratios[hedge_action] if config.experiment.use_hedge_rl else 0.0
+        hedge_state = hedging_rl.get_state(
+            drawdown,
+            vol_percentile,
+            momentum,
+            iv_percentile=iv_percentile,
+            iv_realized_spread=iv_realized_spread,
+        )
+        hedge_joint_action = hedging_rl.select_action(hedge_state) if config.experiment.use_hedge_rl else 0
+        hedge_type_idx, hedge_ratio_idx = hedging_rl.decode_action(hedge_joint_action)
+        hedge_ratio = hedging_rl.hedge_ratios[hedge_ratio_idx] if config.experiment.use_hedge_rl else 0.0
+        hedge_type = (
+            hedging_rl.hedge_types[hedge_type_idx]
+            if config.experiment.use_hedge_rl and hedge_ratio > 1e-8
+            else 'none'
+        )
 
         # --- Apply Portfolio ---
         daily_ret = returns[tickers].iloc[t]
         spy_ret = returns[BENCHMARK].iloc[t]
         invested_ret = (weights * daily_ret).sum()
         cash_ret = cash_weight * (RISK_FREE_RATE / 252)
-        portfolio_ret, hedge_pnl = hedging_rl.apply_hedge(
+        portfolio_ret, hedge_overlay = hedging_rl.apply_hedge(
             invested_ret,
             cash_ret,
             spy_ret,
+            hedge_type,
             hedge_ratio,
             vol_percentile,
+            iv_annualized,
+            iv_percentile,
+            iv_realized_spread,
             drawdown=drawdown,
             momentum=momentum,
         )
+        hedge_pnl = float(hedge_overlay['hedge_pnl'])
+        hedge_cost = float(hedge_overlay['hedge_cost'])
+        hedge_benefit = float(hedge_overlay['hedge_benefit'])
+        effective_hedge_ratio = float(hedge_overlay['effective_hedge_ratio'])
 
         # Transaction cost (on weight changes)
         turnover = 0.0
@@ -394,7 +444,8 @@ def run_full_pipeline(
 
         next_alpha = alpha_opportunity
         next_vol = _portfolio_vol_20d.iloc[t] if t < len(_portfolio_vol_20d) else portfolio_vol
-        next_state = portfolio_rl.get_state(next_alpha, next_vol, regime_belief, uncertainty_score)
+        _next_vol_for_state = next_vol if config.experiment.use_vol_state else 0.012
+        next_state = portfolio_rl.get_state(next_alpha, _next_vol_for_state, _regime_for_state, _uncert_for_state)
         if config.experiment.use_portfolio_rl:
             portfolio_rl.update(state, action, sharpe_reward, next_state)
         if config.experiment.adaptive_combiner:
@@ -407,9 +458,15 @@ def run_full_pipeline(
             mode=config.hedge_reward_mode,
         )
         next_dd = (wealth - peak) / peak
-        next_hedge_state = hedging_rl.get_state(next_dd, vol_percentile, momentum)
+        next_hedge_state = hedging_rl.get_state(
+            next_dd,
+            vol_percentile,
+            momentum,
+            iv_percentile=iv_percentile,
+            iv_realized_spread=iv_realized_spread,
+        )
         if config.experiment.use_hedge_rl:
-            hedging_rl.update(hedge_state, hedge_action, hedge_reward, next_hedge_state)
+            hedging_rl.update(hedge_state, hedge_joint_action, hedge_reward, next_hedge_state)
 
         # Decay exploration
         if t > train_end:
@@ -425,7 +482,9 @@ def run_full_pipeline(
         results['ddlever'].append(ddlever_wealth)
         results['risk_parity'].append(riskparity_wealth)
         results['actions'].append(action)
-        results['hedge_actions'].append(hedge_action)
+        results['hedge_actions'].append(hedge_ratio_idx)
+        results['hedge_type_actions'].append(hedge_type_idx)
+        results['hedge_types'].append(hedge_type)
         results['regime_beliefs'].append(regime_belief)
         results['factor_scores_hist'].append(factor_scores.values.copy())
         results['portfolio_weights'].append(weights.values.copy())
@@ -436,15 +495,22 @@ def run_full_pipeline(
         results['turnover'].append(turnover)
         results['transaction_costs'].append(transaction_cost)
         results['hedge_pnl'].append(hedge_pnl)
+        results['hedge_costs'].append(hedge_cost)
+        results['hedge_benefits'].append(hedge_benefit)
         results['portfolio_returns'].append(portfolio_ret)
         results['cash_weights'].append(cash_weight)
         results['hedge_ratios'].append(hedge_ratio)
+        results['effective_hedge_ratios'].append(effective_hedge_ratio)
         results['source_weights_hist'].append([source_weights['factor'], source_weights['pairs'], source_weights['lstm']])
         results['alpha_dispersion'].append(alpha_dispersion)
         results['regime_entropy'].append(regime_uncertainty)
         results['ic_instability'].append(ic_instability)
         results['garch_vol_uncertainty'].append(garch_vol_uncertainty)
         results['uncertainty_score'].append(uncertainty_score)
+        results['iv_annualized'].append(iv_annualized)
+        results['iv_percentile'].append(iv_percentile)
+        results['iv_realized_spread'].append(iv_realized_spread)
+        results['iv_regime_score'].append(iv_regime_score)
 
     results['tickers'] = tickers
     results['train_end_idx'] = train_end - max(252, train_end)
@@ -479,10 +545,26 @@ def run_full_pipeline(
                     return compute_macro_regime_signal(mw)
                 return 0.5
 
+            def _option_features_fn(t):
+                if option_features.empty:
+                    return {
+                        'iv_annualized': 0.20,
+                        'iv_percentile': 0.50,
+                        'iv_realized_spread': 0.0,
+                        'iv_regime_score': 0.50,
+                    }
+                row = option_features.iloc[max(0, min(len(option_features) - 1, t - 1))]
+                return {
+                    'iv_annualized': float(row.get('iv_annualized', 0.20)),
+                    'iv_percentile': float(row.get('iv_percentile', 0.50)),
+                    'iv_realized_spread': float(row.get('iv_realized_spread', 0.0)),
+                    'iv_regime_score': float(row.get('iv_regime_score', 0.50)),
+                }
+
             e2e_feature_fn = build_e2e_features(
                 returns, tickers,
                 _factor_scores_fn, _garch_vols_fn,
-                _regime_fn, _macro_fn,
+                _regime_fn, _macro_fn, _option_features_fn,
             )
 
             e2e_results = run_e2e_baseline(

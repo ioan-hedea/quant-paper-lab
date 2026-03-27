@@ -1,9 +1,7 @@
 \documentclass[11pt]{article}
 
-\usepackage[margin=1in]{geometry}
+\usepackage[preprint]{neurips_2025}
 \usepackage[T1]{fontenc}
-\usepackage{mathpazo}
-\usepackage{microtype}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{booktabs}
@@ -19,18 +17,6 @@
 \usepackage{caption}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta, shapes.geometric, positioning, fit, backgrounds}
-\usepackage{fancyhdr}
-\usepackage{titlesec}
-
-\linespread{1.05}
-\setlength{\parindent}{1.5em}
-\setlength{\parskip}{4pt}
-
-% Section heading style
-\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
-\titlespacing*{\section}{0pt}{20pt}{8pt}
-\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
-\titlespacing*{\subsection}{0pt}{12pt}{4pt}
 
 \hypersetup{
   colorlinks=true,
@@ -44,47 +30,34 @@
   labelfont=bf
 }
 
-\title{\textbf{A Modular Quantitative Trading Pipeline:}\\
-\Large Alpha Generation, Reinforcement Learning Control, and Risk-Aware Backtesting}
+\title{\textbf{Factor-Anchored Reinforcement Learning for Portfolio Risk Control}\\
+\Large Evidence from Frozen-Bundle Evaluation under Timing and Cost Constraints}
 \author{Ioan Hedea}
-\date{March 2026}
-
-\pagestyle{fancy}
-\fancyhf{}
-\fancyhead[L]{\small\itshape Ioan Hedea}
-\fancyhead[R]{\small\itshape A Modular Quantitative Trading Pipeline}
-\fancyfoot[C]{\small\thepage}
-\renewcommand{\headrulewidth}{0.4pt}
+\date{}
 
 \begin{document}
 \maketitle
-\thispagestyle{plain}
 
 \begin{abstract}
-This paper documents a modular quantitative trading pipeline. The system
-combines cross-sectional factor investing, cointegration-based statistical
-arbitrage, volatility forecasting, regime detection, and a lightweight recurrent
-forecast sleeve with reinforcement-learning-based portfolio allocation, hedging,
-and execution components. The design is intentionally hybrid: classical
-quantitative finance supplies the alpha and risk features, while reinforcement
-learning acts as a sequential control layer for exposure, overlay intensity, and
-tail-risk management. The current implementation also includes a dedicated
-ablation and robustness engine, a configurable information-timing contract for
-macro and fundamental inputs, a constrained allocator between alpha and control,
-and a stylized but nontrivial transaction-cost model. The revised research
-framing tests whether RL is more effective as a controller layered on top of a
-finance-first alpha engine than as an end-to-end trading policy, whether it adds
-value beyond simple rule-based risk management, and which control sleeve is most
-responsible for downside transformation. On the current backtest window, the
-full pipeline attains equity-like return with a materially improved drawdown
-profile relative to SPY while remaining close to the strongest factor-only
-benchmark in upside capture.
+This paper studies whether reinforcement learning is more useful in equity
+trading as a control layer than as an end-to-end predictor. The evaluated setup
+is a modular, factor-anchored pipeline in which finance-first alpha models feed
+a constrained allocator, while RL modulates exposure, protection, and execution
+under explicit timing and transaction-cost assumptions. Rather than relying on a
+best-case exploratory run, the paper ties its claims to a frozen archived
+bundle spanning March 2021 to March 2026. In that archived evaluation, the full
+pipeline improves maximum drawdown by 8.6 percentage points relative to SPY
+($-10.2\%$ versus $-18.8\%$) and exceeds an end-to-end PPO baseline by 8.1
+percentage points of annualized return (17.2\% versus 9.1\%). However, the
+factor-only benchmark and simple rule-based overlays still achieve materially
+higher Sharpe ratios, around 1.9 versus 1.23 for the full RL stack. The
+supported conclusion is therefore deliberately narrow: RL adds value here
+primarily through interpretable downside control rather than through top-line
+performance leadership.
 \end{abstract}
 
 \medskip
 \noindent\textbf{Keywords:} quantitative trading, reinforcement learning, factor investing, statistical arbitrage, regime detection, risk management, backtesting
-
-\bigskip\noindent\rule{\textwidth}{0.4pt}\bigskip
 
 \section{Introduction}
 
@@ -104,7 +77,8 @@ and regime detection \cite{hamilton1989}. The RL layer does not attempt to
 discover alpha from scratch. Instead, it treats alpha as an input and learns how
 aggressively to express it under different risk and market states.
 
-The main contributions of the implementation are fivefold.
+The present implementation contributes five practical elements to the evaluation
+setup.
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item A modular code architecture that cleanly separates data, alpha, control,
       backtesting, and visualization concerns.
@@ -136,6 +110,12 @@ questions.
       primary driver of the observed risk transformation?
 \end{enumerate}
 
+\subsection*{Beyond the Present Manuscript}
+\textit{A natural next step, not evaluated in the present manuscript, concerns
+hedge realism: whether implied-volatility-conditioned, option-style overlays
+such as protective puts, collars, and put spreads improve the downside sleeve
+beyond the current stylized convex hedge approximation.}
+
 From a research perspective, this framing matters because it narrows the gap
 between a teaching prototype and a system that can be discussed in the language
 of quantitative portfolio construction. The objective is not to claim that the
@@ -144,14 +124,15 @@ in which each modeling choice has a clear financial role and where performance
 can be decomposed into alpha generation, risk transformation, and control.
 
 The central defended statement of the paper is therefore sharper than ``the
-system works.'' It is the following: \emph{a factor-anchored RL control layer,
-when placed on top of a strong finance-first alpha stack and evaluated under
-explicit cost and timing assumptions, can preserve much of the upside of the
-alpha engine while materially improving drawdown behavior relative to passive
-equity exposure, outperforming simple rule-based risk management on selected
-risk-adjusted metrics, and remaining more interpretable than an end-to-end RL
-policy.} The rest of the paper is organized to test that claim rather than
-merely to catalogue modules.
+system works.'' \emph{A factor-anchored RL control layer, evaluated under
+explicit cost and timing assumptions, can improve downside control relative to
+passive exposure while remaining more interpretable than an end-to-end policy.}
+\emph{The paper does not claim that this RL layer surpasses the strongest
+finance-first or rule-based baselines on return- and Sharpe-based comparisons.}
+That narrower empirical outcome is still useful, because it helps separate
+where RL contributes to risk transformation from where simpler finance-first
+mechanisms remain stronger. The rest of the paper is organized to test that
+claim rather than merely to catalogue modules.
 
 \section{Related Literature and Design Motivation}
 
@@ -177,6 +158,9 @@ uses a two-state hidden Markov model in the spirit of Hamilton \cite{hamilton198
 alpha generator. This follows the practical observation that in finance, RL is
 often most useful for allocation, inventory, and execution decisions rather than
 for replacing domain-specific signal construction \cite{sutton2018,almgren2000}.
+This role assignment is also motivated by the low signal-to-noise ratio and
+limited effective sample size typical of financial data, which make end-to-end
+policy learning especially brittle.
 
 \textbf{Rule-based risk management and controller baselines.} A key part of the
 evaluation design is to compare the RL controller not only with passive
@@ -185,6 +169,70 @@ reasonably propose as simpler substitutes. In this project, the most important
 examples are volatility targeting and drawdown-based deleveraging. These
 baselines matter because they help distinguish ``RL adds value'' from ``any
 reasonable overlay would have helped.''
+
+\subsection{Recent Work on RL for Portfolio Management}
+
+Recent work on RL in portfolio management and trading can be organized into four
+overlapping strands.
+
+\textbf{End-to-end policy learning.} Early and influential work uses RL to learn
+trading or allocation policies directly from price histories and realized
+rewards \cite{moody2001,deng2017,jiang2017,zhang2020,cong2021,pacheco2023}. The appeal of
+this approach is conceptual elegance: the same learner is asked to extract
+signal, size positions, and adapt sequentially. The difficulty is that
+financial returns are noisy, nonstationary, and data-poor relative to many
+other machine-learning domains. As a result, end-to-end RL systems can be
+sample-inefficient, regime-sensitive, and hard to interpret when they fail
+\cite{gu2020,kolm2019,jander2025}.
+
+\textbf{Neural return forecasting with a separate optimizer.} A second line of
+work uses deep or other machine-learning models to estimate returns, factors, or
+pricing kernels, then hands those forecasts to a conventional optimizer
+\cite{gu2020,chen2021,giglio2022}. This preserves more structure in the
+allocation step than end-to-end RL, and often performs well empirically, but it
+still concentrates modeling risk in a data-hungry prediction layer.
+
+\textbf{RL for execution, hedging, and risk control.} A third strand applies RL
+to narrower sequential tasks such as execution, hedging, and dynamic risk
+management rather than to raw alpha discovery \cite{nevmyvaka2006,kolm2019hedge,
+buehler2019,du2020}. This decomposition is closest to the present paper. The
+core idea is that RL may be most useful where the problem is inherently
+sequential and control-like, while alpha generation remains anchored to domain
+models or explicit financial structure.
+
+\textbf{Benchmarking and reproducibility.} More recent platform and survey work
+has emphasized that RL in finance still suffers from weak evaluation discipline,
+narrow datasets, and inconsistent reporting \cite{sun2023,jander2025}. That
+critique directly motivates the frozen-bundle methodology used here. The paper
+is not only a claim about architecture; it is also a claim about how such
+architectures should be evaluated.
+
+Table~\ref{tab:taxonomy} positions the present approach relative to these
+broader families. The contribution is not a new RL algorithm. It is a
+methodological proposal: if strong finance-first alpha already exists, RL should
+be tested primarily as a controller layered on top of that alpha, then judged
+against both simple rule-based overlays and end-to-end learned alternatives.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Taxonomy of portfolio-management architectures.}
+\label{tab:taxonomy}
+\begin{tabular}{@{} >{\raggedright\arraybackslash}p{2.1cm}
+                >{\raggedright\arraybackslash}p{2.1cm}
+                >{\raggedright\arraybackslash}p{2.15cm}
+                >{\raggedright\arraybackslash}p{1.45cm}
+                >{\raggedright\arraybackslash}p{4.2cm} @{}}
+\toprule
+\textbf{Approach} & \textbf{Alpha source} & \textbf{Control logic} & \textbf{Interp.} & \textbf{Representative references} \\
+\midrule
+Classical factors & Hand-crafted financial signals & Fixed allocator or simple overlay rules & High & Fama--French style factor investing \cite{fama1993} \\
+End-to-end RL & Learned from market histories & RL policy directly selects positions or weights & Low to medium & Direct trading and portfolio RL \cite{moody2001,jiang2017,zhang2020,cong2021} \\
+Neural forecasting + optimizer & Neural or ML return forecasts & Separate optimizer translates forecasts into holdings & Medium & Asset-pricing and return-forecast models \cite{gu2020,chen2021,giglio2022} \\
+\textbf{This paper} & \textbf{Finance-first alpha models} & \textbf{RL modulates exposure, hedging, and execution} & \textbf{High} & \textbf{Frozen-bundle control-layer evaluation} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Contribution Type}
 
@@ -198,6 +246,9 @@ architecture with an explicit constrained allocator between alpha and control.
 Third, it pairs the architecture with an evaluation workflow designed to test
 that claim via ablations, timing-discipline checks, robustness slices, and
 regime-conditional policy analysis.
+The contribution is therefore chiefly methodological: the paper proposes and
+tests a disciplined way to evaluate RL as a control layer rather than as a
+monolithic trading policy.
 
 \section{System Architecture}
 
@@ -378,6 +429,9 @@ maximize long-run wealth while limiting drawdown, volatility, and unnecessary
 turnover. This is the reason the project separates alpha estimation from control:
 the two tasks operate on different time scales and carry different inductive
 biases.
+Importantly, the RL layer does not forecast $r_{t+1}$ directly; it maps a state
+summarizing alpha quality and risk conditions into exposure, overlay, and
+protection decisions.
 
 \subsection{Cross-Sectional Factor Model}
 
@@ -479,6 +533,9 @@ concentration limits. This layer is architecturally important because it makes
 the separation of concerns sharper: alpha expresses expected return, the
 optimizer expresses institutional portfolio constraints, and RL governs when to
 lean into or away from that target book.
+This intermediate layer is not only an architectural convenience; it reflects
+the practical fact that many real portfolio systems mediate between forecast
+signals and final positions through a constrained allocator.
 
 \subsection{Reward Design}
 
@@ -510,6 +567,9 @@ In addition to the default differential-Sharpe-style objective, the evaluation
 protocol can compare raw-return and Sortino-style reward formulations. This
 matters because reward design is one of the least observable but most important
 degrees of freedom in RL-for-finance systems.
+Because reward specification changes the controller's operating point, it should
+be treated as a methodological degree of freedom rather than as a neutral
+implementation detail.
 
 \subsection{No-Trade Band and Hedging}
 
@@ -518,7 +578,8 @@ weights. When only part of the portfolio is changed, the active weights are
 rescaled to preserve the desired capital budget.
 
 The hedging RL layer observes drawdown, volatility regime, and recent momentum.
-It chooses one of four hedge intensities. The total one-period return can be
+In the archived experiment reported here, it chooses one of four hedge
+intensities. The total one-period return can be
 written schematically as
 \[
 r_t^{\text{total}} =
@@ -531,6 +592,8 @@ Although stylized, this formulation captures the intended economics of a
 protection sleeve: hedging should be mildly costly in calm periods, increasingly
 helpful in volatile or negative markets, and most valuable when drawdowns and
 adverse momentum coincide.
+The reported hedge sleeve should therefore be interpreted as a tractable
+convex-loss proxy, not as a market-consistent options strategy.
 
 \subsection{Transaction Costs and Execution Realism}
 
@@ -550,10 +613,22 @@ rather than purely cosmetic.
 
 \section{Experimental Design}
 
-The backtest uses a walk-forward protocol over approximately five years of daily
-data. The sample is split evenly into training and test segments. The LSTM
-sleeve is first trained on the initial window, after which the full pipeline is
-rolled forward one trading day at a time.
+The archived bundle used in the paper contains approximately 1{,}250 daily
+observations from late March 2021 through late March 2026. The reported main
+split trains the upstream statistical components on the initial segment through
+March 23, 2023 and then evaluates the walk-forward controller from March 23,
+2023 to March 24, 2026. The manuscript is tied to this frozen archived bundle,
+used as the latest complete saved research run for the current configuration,
+even though the live codebase may already contain extensions not exercised by
+the reported evidence. This does not eliminate prior exploratory iteration, but
+it does make the reported evidence bundle explicit and reproducible.
+Within the archived suite itself, action ladders, optimizer settings, reward
+choices, and comparison baselines are then held fixed across ablations,
+split-fraction tests, and rolling-window robustness slices.
+
+Within that archived run, the LSTM sleeve is first trained on the initial
+window, after which the full pipeline is rolled forward one trading day at a
+time with the configuration held fixed during evaluation.
 
 At each date, the pipeline executes the following sequence. First, factor, pairs,
 GARCH, HMM, macro, and LSTM features are generated from the available data.
@@ -565,7 +640,7 @@ at the realized portfolio return, which is finally used to update both RL value
 tables before advancing to the next trading day.
 
 The comparison set now goes beyond passive and naive portfolio baselines. In
-addition to SPY buy-and-hold, equal weight, and factor-only, the research
+addition to SPY buy-and-hold, equal-weight, and the factor-only benchmark, the research
 protocol includes a volatility-targeting overlay on the factor book, a
 drawdown-based deleveraging rule, and an end-to-end PPO baseline that receives
 the same broad information set as the modular architecture. These additions are
@@ -578,19 +653,22 @@ monolithic learning policy.
 The benchmark set is chosen to isolate different sources of value. SPY measures
 whether the pipeline adds value relative to a standard passive equity exposure.
 Equal weight tests whether the broadened universe alone produces useful
-diversification benefits. Factor-only isolates the pure alpha layer without any
-RL overlay. Comparing the full pipeline against factor-only is particularly
+diversification benefits. The factor-only benchmark isolates the pure alpha layer without any
+RL overlay. Comparing the full pipeline against the factor-only benchmark is particularly
 important because it reveals whether RL is adding value as a controller or merely
 acting as a drag on a strong stock-selection engine.
 
 The newer comparison baselines sharpen that logic further. The volatility
 targeting baseline asks whether most of the observed improvement can be matched
-by simple inverse-vol scaling. The drawdown deleveraging baseline asks whether a
-threshold rule can replicate the hedge sleeve's protection. The end-to-end PPO
+by simple inverse-vol scaling. The drawdown-based deleveraging baseline asks
+whether a threshold rule can replicate the hedge sleeve's protection. The
+end-to-end PPO
 baseline addresses the paper's most distinctive architectural question: if one
 hands the same state information to a monolithic policy, does it outperform a
 hybrid design in which finance-specific modules produce the target book and RL
 only controls how aggressively to express it?
+These baselines are deliberately strong because they represent the kinds of
+simple overlays a practitioner would try before accepting the complexity of RL.
 
 \subsection{Transaction Costs and Carry}
 
@@ -644,6 +722,10 @@ Calmar ratio scales annualized return by the magnitude of maximum drawdown. Each
 metric emphasizes a different aspect of the return distribution, which matters in
 this project because the pipeline is explicitly designed to reshape tail risk,
 not merely to maximize mean return.
+Table~\ref{tab:metrics} focuses on the primary comparison metrics used in the
+main strategy table: return, volatility, Sharpe, maximum drawdown, and Calmar.
+Sortino and Value-at-Risk are retained as secondary diagnostics in the text,
+reward-ablation evidence, and archived research artifacts.
 
 In addition, the research runner emits regime-conditional summaries of
 portfolio action, hedge ratio, cash weight, turnover, transaction-cost drag, and
@@ -659,150 +741,96 @@ Calmar, and pairwise performance differences versus benchmark strategies.
 
 \section{Results}
 
-This section is organized around the paper's research questions rather than
-around the diagnostic plots themselves. First, does the full pipeline produce a
-strong headline result on the main walk-forward window? Second, what does each
-module contribute in ablation, and what does that imply for RQ3? Third, how
-does the controller compare with simple rule-based overlays and an end-to-end
-RL baseline, which directly addresses RQ1 and RQ2? Fourth, do the improvements
-survive across rolling subperiods rather than only on one realized path, and
-does the controller behave differently across regimes in a way that matches the
-architecture's intended role?
+This section moves from the main walk-forward evidence to ablation, comparisons
+against rule-based overlays and end-to-end PPO, rolling robustness slices, and
+regime-conditioned behavior. The organizing question throughout is whether the
+data support the narrower claim that RL helps more as a controller than as a
+predictor.
 
 \subsection{Main Result}
 
-The most recent strong run uses a test window from September 20, 2023 to
-March 23, 2026. The summary metrics are shown in Table~\ref{tab:metrics}. This
-is the single-run result that motivates the rest of the empirical analysis, not
-the only piece of evidence the paper relies on.
+The archived research run used for the paper's main evidence uses a test window
+from March 23, 2023 to March 24, 2026. The summary metrics are shown in
+Table~\ref{tab:metrics}. This is still only one realized path, but it is the
+same saved checkpoint that also feeds the ablation, robustness, and significance
+artifacts discussed in the remainder of the paper.
 
 \begin{table}[H]
 \centering
 \caption{Performance summary on the walk-forward test window
-  (20 Sep 2023 -- 23 Mar 2026). Annualized figures. Max DD denotes maximum
+  (23 Mar 2023 -- 24 Mar 2026). Annualized figures. Max DD denotes maximum
   peak-to-trough drawdown; Calmar is annualized return divided by $|\text{Max DD}|$.}
 \label{tab:metrics}
 \begin{tabular}{@{} l r r r r r @{}}
 \toprule
 \textbf{Strategy} & \textbf{Return} & \textbf{Volatility} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
 \midrule
-Full Pipeline & 32.0\% & 12.9\% & 2.21 & $-$11.7\% & 2.72 \\
-Factor Only   & 33.4\% & 15.3\% & 1.96 & $-$16.5\% & 2.03 \\
-Equal Weight  & 22.7\% & 11.7\% & 1.63 & $-$14.8\% & 1.53 \\
-SPY           & 18.4\% & 15.7\% & 0.95 & $-$18.8\% & 0.98 \\
+Full pipeline            & 17.2\% & 11.1\% & 1.23 & $-$10.2\% & 1.68 \\
+SPY                      & 17.9\% & 15.7\% & 0.92 & $-$18.8\% & 0.96 \\
+Equal-weight            & 22.8\% & 11.7\% & 1.65 & $-$14.8\% & 1.54 \\
+Factor-only benchmark    & 33.1\% & 15.3\% & 1.94 & $-$16.5\% & 2.01 \\
+Vol-target               & 28.9\% & 13.2\% & 1.92 & $-$14.8\% & 1.95 \\
+DD-Delever               & 30.2\% & 13.7\% & 1.95 & $-$14.9\% & 2.02 \\
+E2E RL (PPO)             & 9.1\% & 9.1\% & 0.62 & $-$14.0\% & 0.65 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The main result is consistent with the paper's central claim on the strongest
-single window. The full pipeline remains close to the factor benchmark in return
-while materially reducing drawdown and volatility. Relative to SPY, it improves
-both raw and risk-adjusted performance. Relative to factor-only, it gives up a
-small amount of raw return in exchange for a meaningfully better downside
-profile. On its own, this is encouraging but still only a single-path result.
+The main result is partly negative and partly favorable, which is exactly what
+makes it more credible than the earlier best-case narrative.
 
-\subsection{Ablation Result}
+Relative to SPY, the full pipeline is almost flat on annualized return, 17.2\%
+versus 17.9\%, while materially improving volatility, Sharpe, and drawdown. The
+passive-benchmark comparison therefore supports the claim that the controller
+can reshape downside risk in a useful way.
+The relatively strong equal-weight result is also informative: some of the
+benefit in this universe comes from broad diversification across growth,
+defensive, and diversifier sleeves rather than from RL control alone.
 
-The most important workshop-level question is not whether the full system does
-well on one path, but whether the component layering supports the paper's
-architectural claim. For that reason the research runner now emits an ablation
-summary comparing factor-only, the alpha stack without RL, alpha plus portfolio
-RL, alpha plus hedge RL, and the full pipeline across multiple split settings.
+Relative to the factor-only benchmark, the conclusion is less favorable. The
+full pipeline is far below the factor core on both return and Sharpe, so the
+reported evidence does not support any stronger claim that RL preserves most of
+the upside of the alpha engine.
 
-\IfFileExists{research_paper_tables.tex}{
-\input{research_paper_tables.tex}
-}{
-\IfFileExists{stock_trading/research_paper_tables.tex}{
-\input{stock_trading/research_paper_tables.tex}
-}{
-\noindent\textit{Ablation note.} When the research runner completes, the paper
-automatically includes a generated ablation table and a rolling-window
-robustness table sourced from the evaluation artifacts.
-}
-}
+Relative to the strongest rule-based overlays, the result is also negative. Both
+volatility targeting and drawdown-based deleveraging outperform the full
+pipeline on return- and Sharpe-based comparisons in the archived sample.
 
-The generated ablation table sharpens the story. Averaged across split settings,
-factor-only is still the strongest pure alpha expression, with mean return of
-22.5\% and mean Sharpe of 1.57. The full pipeline is weaker on those raw upside
-metrics, at 17.0\% mean return and 1.20 mean Sharpe, but it posts the best mean
-drawdown profile in the table at $-11.6\%$ and the lowest mean volatility at
-11.3\%. The hedge-only ablation is the strongest intermediate configuration,
-with mean Sharpe 1.37 and mean drawdown $-12.0\%$, while portfolio RL without
-the hedge sleeve is the weakest controller variant, at mean Sharpe 0.99. This
-pattern is informative: naive control can under-express the alpha engine, while
-the downside improvement appears to come primarily from the protection layer and
-from the joint portfolio-plus-hedge design.
+Relative to the end-to-end PPO baseline, the result is directionally favorable.
+The modular pipeline substantially outperforms PPO on archived-sample point
+estimates and avoids the much
+weaker return profile of the monolithic policy.
 
-\subsection{Rule-Based and End-to-End Baseline Evidence}
+\noindent\textit{Implication for RQ1 and RQ2.} The main table alone already
+suggests a qualified positive-negative result: favorable for modular RL
+relative to PPO and passive exposure, but not favorable for RL relative to the
+strongest non-RL overlays.
 
-The next layer of evidence is designed to answer whether the RL controller is
-actually doing something more interesting than a simple heuristic. The expanded
-evaluation grid now includes a volatility-targeting baseline, a drawdown-based
-deleveraging baseline, and an end-to-end PPO policy trained on the same broad
-feature set. Conceptually, these are important baselines for different reasons.
-The first two are the strongest ``cheap'' alternatives a practitioner might try
-before reaching for RL, while the end-to-end PPO agent is the most direct test
-of the paper's controller-versus-monolith thesis.
-
-Because these baselines are integrated into the research runner and the main
-performance figures, the updated report structure is ready to surface them as
-first-class evidence rather than as optional side comparisons. Once the next
-evaluation pass is executed, the paper should report them directly in the main
-results table and in the bootstrap significance summary, not only in appendix
-artifacts. That is the appropriate evidentiary standard for RQ1 and RQ2.
-
-\subsection{Robustness Across Windows}
-
-Single-path backtests can be persuasive but are rarely sufficient. The research
-runner therefore evaluates the full pipeline across rolling windows and then
-summarizes median Sharpe, median Calmar, drawdown dispersion, and benchmark beat
-fractions. In the currently available run, the median full-pipeline Sharpe
-across rolling windows is 1.65, the median Calmar is 3.26, and the median
-maximum drawdown is $-6.8\%$. The full pipeline beats SPY on both Sharpe and
-Calmar in 100\% of the available rolling windows, and it beats the factor
-benchmark on drawdown in 100\% of windows. At the same time, it does
-\emph{not} beat the factor benchmark on Calmar in the current rolling sample.
-That nuance matters: the controller appears reliably valuable for downside
-reshaping, but not yet universally superior to the raw factor engine on all
-risk-adjusted metrics.
-
-The updated evaluation protocol goes further than the currently reported run.
-It expands the rolling-window design to several overlapping slices and augments
-the summary outputs with block-bootstrap confidence intervals. This is
-important, because the real workshop-level claim is not that one window looks
-good, but that the architecture exhibits structurally sensible behavior across
-multiple market segments under explicit uncertainty bands.
-
-\subsection{Behavioral and Regime Evidence}
-
-The behavioral question is whether the controller is acting like a sequential
-decision system. Figures~\ref{fig:rl}--\ref{fig:execution} provide the detailed
-diagnostics, while the compact research figure aggregates the same story at a
-higher level. The regime summaries show that the full-pipeline controller is not
-degenerate: across experiments it carries nonzero hedge ratios, nontrivial cash
-weights, and changing turnover profiles rather than collapsing to an always-in,
-never-hedged policy. The resulting pattern is not perfectly monotone across
-every split and window, which is itself a useful finding: the controller is
-state-dependent, but the mapping from estimated regime to final action is still
-partly entangled with the quality of the upstream alpha and hedge signals.
-
-\IfFileExists{pipeline_research_eval.png}{
+\IfFileExists{results/20260327_experiments/stock_trading/pipeline_research_eval.png}{
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{pipeline_research_eval.png}
+\includegraphics[width=\textwidth]{results/20260327_experiments/stock_trading/pipeline_research_eval.png}
 \caption{Compact workshop-style summary figure generated by the robustness
 engine. The four panels show the main equity-curve result, ablation evidence,
-rolling-window robustness, and regime-conditional controller behavior.}
+rolling-window robustness, and regime-conditional controller behavior. The
+figure makes clear that the strongest raw-performance outcomes in the archived
+bundle come from the factor-only benchmark and the strongest simple overlays,
+not from the full RL stack, while also showing that the modular RL stack
+remains visibly above the end-to-end PPO baseline.}
 \label{fig:research}
 \end{figure}
 }{
-\IfFileExists{stock_trading/pipeline_research_eval.png}{
+\IfFileExists{stock_trading/results/20260327_experiments/stock_trading/pipeline_research_eval.png}{
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{stock_trading/pipeline_research_eval.png}
+\includegraphics[width=\textwidth]{stock_trading/results/20260327_experiments/stock_trading/pipeline_research_eval.png}
 \caption{Compact workshop-style summary figure generated by the robustness
 engine. The four panels show the main equity-curve result, ablation evidence,
-rolling-window robustness, and regime-conditional controller behavior.}
+rolling-window robustness, and regime-conditional controller behavior. The
+figure makes clear that the strongest raw-performance outcomes in the archived
+bundle come from the factor-only benchmark and the strongest simple overlays,
+not from the full RL stack, while also showing that the modular RL stack
+remains visibly above the end-to-end PPO baseline.}
 \label{fig:research}
 \end{figure}
 }{
@@ -812,48 +840,277 @@ cost sensitivity, and regime-conditioned policy behavior.
 }
 }
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{pipeline_performance.png}
-\caption{Performance comparison for the full pipeline and benchmark strategies.}
-\label{fig:performance}
-\end{figure}
+\subsection{Ablation Result}
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{pipeline_rl_analysis.png}
-\caption{Behavioral diagnostics for the portfolio and hedging RL layers.}
-\label{fig:rl}
-\end{figure}
+The most important workshop-level question is not whether the full system does
+well on one path, but whether the component layering supports the paper's
+architectural claim. For that reason the research runner now emits an ablation
+summary comparing the factor-only benchmark, the alpha stack without RL, alpha
+plus portfolio RL, alpha plus hedge RL, and the full pipeline across multiple
+split settings.
 
-\begin{figure}[H]
+\begin{table}[H]
 \centering
-\includegraphics[width=\textwidth]{pipeline_alpha_models.png}
-\caption{Alpha model diagnostics: per-sleeve signal quality and adaptive combination weights over the test window.}
-\label{fig:alpha}
-\end{figure}
+\caption{Ablation summary across train/test split settings.}
+\label{tab:ablation_summary}
+\begingroup\small
+\begin{tabular}{@{} l r r r r r @{}}
+\toprule
+\textbf{Component} & \textbf{Return} & \textbf{Vol.} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
+\midrule
+Factor-only benchmark & 21.7\% & 12.2\% & 1.50 & $-$14.0\% & 1.55 \\
+Factor + pairs        & 21.7\% & 12.2\% & 1.50 & $-$13.9\% & 1.56 \\
+Factor + LSTM         & 21.6\% & 12.2\% & 1.49 & $-$13.9\% & 1.55 \\
+Alpha stack (no RL)   & 17.7\% & 13.0\% & 1.09 & $-$14.5\% & 1.22 \\
+Alpha + portfolio RL  & 14.7\% & 11.9\% & 0.95 & $-$13.5\% & 1.09 \\
+Alpha + hedge RL      & 18.0\% & 12.3\% & 1.18 & $-$13.1\% & 1.38 \\
+Full pipeline         & 15.7\% & 11.1\% & 1.10 & $-$11.3\% & 1.43 \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
 
+\begin{table}[H]
+\centering
+\caption{Rolling-window robustness summary for the full pipeline.}
+\label{tab:robustness_summary}
+\begin{tabular}{@{} l r @{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Rolling windows                                    & 6 \\
+Median full-pipeline Sharpe                        & 1.32 \\
+Median full-pipeline Calmar                        & 2.55 \\
+Median full-pipeline Max DD                        & $-$7.2\% \\
+Frac. windows full beats factor-only benchmark on drawdown & 67\% \\
+Frac. windows full beats factor-only benchmark on Calmar   & 17\% \\
+Frac. windows full beats SPY on Sharpe             & 83\% \\
+Frac. windows full beats SPY on Calmar             & 100\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Block-bootstrap significance for full pipeline versus baselines (Sharpe deltas).}
+\label{tab:bootstrap_significance}
+\begin{tabular}{@{} l r r r @{}}
+\toprule
+\textbf{Comparison} & \textbf{Delta Sharpe} & \textbf{95\% CI} & \textbf{p-value} \\
+\midrule
+Full -- SPY                     & 0.31  & [-0.47, 1.01] & 0.455 \\
+Full -- Factor-only benchmark   & -0.70 & [-1.34, -0.26] & 0.000 \\
+Full -- Vol-target              & -0.69 & [-1.26, -0.22] & 0.005 \\
+Full -- DD-Delever              & -0.72 & [-1.27, -0.22] & 0.010 \\
+Full -- E2E RL (PPO)            & 0.62  & [-0.39, 1.50] & 0.280 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The generated ablation table sharpens the story considerably. Averaged across
+split settings, the factor-only benchmark remains the strongest pure alpha expression, with
+mean return of 21.7\% and mean Sharpe of 1.50. The pairs and LSTM sleeves add
+very little incremental value on top of that base. This is a useful pruning
+result: on top of the factor core in the current archived evaluation bundle,
+the pairs and LSTM sleeves do not add enough incremental value to justify their
+complexity. The full pipeline is
+materially weaker on raw upside, at 15.7\%
+mean return and 1.10 mean Sharpe, but it posts the best mean drawdown profile
+in the table at $-11.3\%$ and the lowest mean volatility at 11.1\%. The
+hedge-only ablation is the strongest intermediate RL configuration, with mean
+Sharpe 1.18 and mean drawdown $-13.1\%$, while portfolio RL without the hedge
+sleeve is the weakest controller variant, at mean Sharpe 0.95. This pattern is
+informative: exposure control on its own can under-express the alpha engine, and
+most of the RL contribution appears to come through protection and joint
+portfolio-plus-hedge coordination rather than through aggressive risk taking.
+
+\noindent\textit{Implication for RQ3.} Supported. The ablation evidence points
+much more strongly to the protection sleeve, and to the joint
+portfolio-and-hedge design, than to portfolio RL alone.
+
+\subsection{Rule-Based and End-to-End Baseline Evidence}
+
+The next layer of evidence asks whether the RL controller is doing something
+meaningfully different from simple heuristics. On this archived run, the
+volatility-targeting and drawdown-based deleveraging baselines are deliberately
+strong comparators: both deliver around 29--30\% annualized return with Sharpe
+ratios near 1.93--1.95, well above the full pipeline's 1.23. The bootstrap
+significance table makes the same point more formally. Relative to vol-target
+and drawdown-based deleveraging, the full pipeline's Sharpe deficit is around
+0.69 to 0.72, and the 95\% confidence intervals remain below zero. The
+significance evidence is therefore asymmetric: the full pipeline's Sharpe
+deficits relative to the factor-only benchmark and the strongest rule-based
+overlays survive bootstrap uncertainty, while its apparent advantage over SPY
+and PPO does not reach comparable statistical strength in this archived sample.
+
+In the archived sample, RQ2 is not supported. The evidence in this manuscript
+does not support the claim that RL adds value over the strongest simple
+rule-based overlays on Sharpe or return. RQ1 receives stronger directional
+support. The end-to-end PPO baseline reaches only 9.1\% annualized return and
+0.62 Sharpe, so the modular architecture substantially outperforms PPO on point
+estimates, even though the bootstrap-based Sharpe delta is not statistically
+decisive at conventional levels. Here point estimates refer to the archived
+sample's observed annualized return, Sharpe, and drawdown metrics before
+bootstrap uncertainty qualification. That is still an important result: the data
+support RL as a control layer much more strongly than RL as a monolithic
+trading policy.
+
+\noindent\textit{Implication for RQ1.} Supported directionally: modular RL is
+materially better than end-to-end PPO in point estimates, but the manuscript
+does not claim a statistically decisive Sharpe advantage.
+
+\noindent\textit{Implication for RQ2.} Not supported in the archived sample: the
+strongest simple non-RL overlays outperform the RL controller on return and
+Sharpe.
+
+\subsection{Reward-Function Sensitivity}
+
+Reward design affects where the controller lands on the risk-return frontier,
+but it does not overturn the broader architectural story. Across the full
+pipeline reward-function ablation, the raw-return reward variant delivers the
+highest annualized return at 17.7\% and the highest Sharpe at 1.26, while the
+Sortino-style reward produces the best drawdown and Calmar profile, with
+maximum drawdown improving to $-9.4\%$ and Calmar rising to 1.78. The default
+differential-Sharpe reward is therefore not uniquely optimal; it is simply one
+reasonable compromise. This is a useful methodological reminder that reward
+choice materially shifts the policy's operating point even when the state and
+action spaces are held fixed.
+
+\begin{table}[H]
+\centering
+\caption{Reward-function ablation for the full pipeline on the archived bundle.}
+\label{tab:reward_ablation}
+\begin{tabular}{@{} l r r r r @{}}
+\toprule
+\textbf{Reward} & \textbf{Return} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
+\midrule
+Differential Sharpe & 16.4\% & 1.18 & $-$11.5\% & 1.42 \\
+Return              & 17.7\% & 1.26 & $-$10.2\% & 1.74 \\
+Sortino             & 16.8\% & 1.23 & $-$9.4\%  & 1.78 \\
+Mean-Variance       & 16.5\% & 1.18 & $-$9.5\%  & 1.73 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The archived reward-ablation evidence is therefore specific to the modular full
+pipeline. A comparable PPO reward sweep is not treated as primary evidence in
+this manuscript because the archived suite did not preserve an equally complete
+reward-by-split comparison grid for PPO, and the smaller set of PPO reward runs
+is materially noisier because each trial depends on fresh stochastic policy
+training.
+
+\noindent\textit{Implication for methodology.} Reward choice matters
+substantially for where the controller lands on the risk-return frontier, but it
+does not overturn the paper's main qualitative result: reward tuning changes the
+controller's operating point on the risk-return frontier without overturning the
+broader qualitative ranking in which the factor-only benchmark and the strongest
+simple overlays remain stronger on return- and Sharpe-based comparisons.
+
+\subsection{Robustness Across Windows}
+
+Single-path backtests can be persuasive but are rarely sufficient. The research
+runner therefore evaluates the full pipeline across rolling windows and then
+summarizes median Sharpe, median Calmar, drawdown dispersion, and benchmark beat
+fractions. In the archived run, the median full-pipeline Sharpe across rolling
+windows is 1.32, the median Calmar is 2.55, and the median maximum drawdown is
+$-7.2\%$. The full pipeline beats SPY on Sharpe in 83\% of windows and on
+Calmar in 100\% of windows. Relative to the factor-only benchmark, however, the
+picture is mixed: the full pipeline posts a better drawdown in 67\% of windows
+but a better Calmar in only 17\% of them. That nuance is exactly why the
+rolling-window engine matters. The controller appears structurally valuable for
+downside reshaping relative to passive exposure, but not yet structurally
+dominant over the strongest finance-first benchmark.
+These windows still come from one historical sample and should therefore be
+interpreted as internal robustness slices rather than independent replications.
+
+The same evidence also helps calibrate the paper's statistical tone. The
+bootstrap significance summary shows that the full pipeline's Sharpe advantage
+over SPY is positive in point estimate but not statistically decisive, while its
+Sharpe disadvantage relative to the factor-only benchmark and the two rule-based overlays is
+large enough to survive block-bootstrap uncertainty bands. The appropriate
+claim, then, is not that robustness is ``won,'' but that the architecture now
+supports a falsifiable and transparent robustness protocol.
+
+\noindent\textit{Implication for the overall claim.} The rolling evidence is
+favorable for downside reshaping relative to SPY, but only mixed relative to
+the factor-only benchmark and the strongest rule-based alternatives.
+
+\IfFileExists{results/20260327_experiments/stock_trading/pipeline_rolling_windows.png}{
 \begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{pipeline_execution_rl.png}
-\caption{Execution RL layer: turnover management, no-trade band activations, and realized transaction-cost drag.}
-\label{fig:execution}
+\includegraphics[width=\textwidth]{results/20260327_experiments/stock_trading/pipeline_rolling_windows.png}
+\caption{Rolling-window robustness from the archived March 2026 experiment
+bundle. The full pipeline is consistently stronger than SPY on Calmar and
+usually stronger on Sharpe, but it remains below the factor-only benchmark and the best
+rule-based overlays on median upside-oriented metrics. These rolling windows are
+internal robustness slices from one archived historical sample rather than
+independent replications.}
+\label{fig:rollingwindows}
 \end{figure}
+}{
+\IfFileExists{stock_trading/results/20260327_experiments/stock_trading/pipeline_rolling_windows.png}{
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{stock_trading/results/20260327_experiments/stock_trading/pipeline_rolling_windows.png}
+\caption{Rolling-window robustness from the archived March 2026 experiment
+bundle. The full pipeline is consistently stronger than SPY on Calmar and
+usually stronger on Sharpe, but it remains below the factor-only benchmark and the best
+rule-based overlays on median upside-oriented metrics. These rolling windows are
+internal robustness slices from one archived historical sample rather than
+independent replications.}
+\label{fig:rollingwindows}
+\end{figure}
+}{}
+}
+
+\subsection{Behavioral and Regime Evidence}
+
+The behavioral question is whether the controller is acting like a sequential
+decision system. Figure~\ref{fig:research} provides the main summary used in the
+paper, while supplementary alpha and execution diagnostics are reported in
+Appendix Figures~\ref{fig:alpha} and \ref{fig:execution}. The regime
+summaries show that the controller is not degenerate:
+it carries nonzero hedge ratios, nontrivial cash weights, and changing turnover
+profiles rather than collapsing to an always-in, never-hedged policy. At the
+same time, the archived baseline split shows only modest regime separation. In
+the representative full-pipeline split, average portfolio action declines from
+roughly 2.08 in bull states to 1.26 in bear states, and average cash weight
+rises from about 6.6\% to 10.6\%, but hedge intensity is comparatively flat.
+That is a constructive research finding rather than a failure. The controller is
+reacting, but mostly through exposure throttling rather than through a strongly
+state-contingent hedge sleeve. This behavioral pattern is consistent with the
+ablation evidence that the protection sleeve matters, but that the present hedge
+policy may still be under-expressive relative to its intended role. This is
+exactly the kind of behavioral gap that motivates the paper's forward-looking
+interest in implied-volatility-conditioned and option-style hedging overlays.
+
+\noindent\textit{Implication for RQ3.} Supported, but only partially. The
+behavioral evidence is consistent with hedge-related control mattering more than
+portfolio RL alone, while also suggesting that the hedge policy remains less
+state-contingent than intended.
 
 \section{Discussion}
 
-The experimental results support two conclusions of particular methodological importance.
+The experimental results support three conclusions of particular methodological importance.
 
 First, the data and alpha side of the pipeline is doing real work. The
-factor-only benchmark is strong, and equal-weight also performs well, suggesting
-that the broader universe and adaptive alpha combination add meaningful signal.
+factor-only benchmark is strong, and equal-weight also performs reasonably well,
+which suggests that the diversified universe and the factor core contribute most
+of the signal, while the non-factor sleeves currently add limited incremental
+value in the archived evaluation. The relatively strong equal-weight result is
+itself informative: part of the observed performance comes from broadening the
+universe and diversifying across sectors and defensive sleeves, not only from
+the more elaborate control machinery. In the current archived evaluation, the
+paper's strongest alpha evidence comes from the factor core, not from the
+auxiliary pairs or LSTM sleeves.
 
-Second, the latest factor-anchored RL design improves the role of the control
-layer, but in a narrower sense than simple benchmark outperformance. The
-ablation results suggest that the full pipeline's main contribution is
-downside-risk transformation rather than universal metric dominance. Factor-only
-remains the strongest pure alpha engine, while the full pipeline is the
-cleanest lower-drawdown expression of that engine.
+Second, the factor-anchored RL design is helpful in a narrower sense than simple
+benchmark outperformance. The ablation, rolling-window, and significance results
+all suggest that the full pipeline's main contribution is downside-risk
+transformation rather than universal metric dominance. The factor-only benchmark
+remains the strongest pure alpha engine, and the simple vol-target and
+drawdown-based deleveraging overlays are stronger than the RL controller on this
+sample's primary return- and Sharpe-based metrics.
 
 This distinction is central. If the RL layer were treated as a second stock
 selector, it would risk duplicating the alpha problem with a less structured
@@ -862,15 +1119,49 @@ pipeline preserves interpretability: alpha determines \emph{what} to own, while
 RL primarily determines \emph{how much} to own and \emph{how much protection} to
 carry.
 
+What did not work is equally important. RL did not beat the strongest
+rule-based overlays on Sharpe or return in the archived sample. Portfolio RL on
+its own underperformed and could under-express the alpha engine. The pairs and
+LSTM sleeves added little incremental value beyond the factor core. Finally, the
+hedge response appears flatter across regimes than the intended design would
+prefer. These are useful negative results because they narrow where future
+improvements should be sought. For a control-layer study, these failures are not
+incidental; they are precisely what helps delimit where RL is and is not adding
+value.
+
 The results also suggest a useful practical lesson. Improvements in data quality
 and signal specification are likely to matter more from this point onward than
 adding more control complexity. The current architecture is already rich enough
-to express nontrivial risk management behavior, but the rolling-window evidence
-shows that the raw factor engine still dominates the full pipeline on some
-upside-oriented metrics. Future gains will likely come from more realistic
-point-in-time fundamentals, true macro vintage data, cross-asset regime
-features, explicit uncertainty conditioning, stronger statistical validation,
-and richer hedging instruments.
+to express nontrivial risk-management behavior, but the rolling-window evidence
+shows that the factor-only benchmark and cheap rule-based overlays still dominate
+the full pipeline on upside-oriented metrics. Future gains will likely come
+from more realistic point-in-time fundamentals, true macro vintage data,
+cross-asset regime features, explicit uncertainty conditioning, stronger
+statistical validation, and richer hedging instruments with implied-volatility
+information.
+
+\subsection{When Practitioners Should Use This Architecture}
+
+The archived evidence suggests a fairly specific use case for factor-anchored RL
+control rather than a universal recipe. The architecture is most defensible when
+downside protection matters more than raw return maximization, when
+interpretability matters for institutional adoption or model governance, when a
+credible finance-first alpha engine already exists, and when the research or
+production setting can support daily rebalancing together with periodic RL
+training and monitoring.
+
+Simpler alternatives are often sufficient in other settings. If the primary goal
+is pure Sharpe maximization on this kind of daily equity universe, the archived
+bundle suggests that the factor-only benchmark and simple overlays such as
+volatility targeting or drawdown-based deleveraging are harder to beat. If
+computational budgets are tight, rule-based overlays are also easier to train,
+debug, and explain. And if the alpha layer is weak, RL is unlikely to rescue the
+system: the controller can reshape risk, but it cannot compensate for the
+absence of robust signal quality.
+
+The practical contribution is therefore not ``always use RL.'' It is narrower:
+when RL is appropriate in finance, it appears more defensible as a controller
+over a strong signal engine than as a replacement for prediction itself.
 
 \section{Threats to Validity and Future Work}
 
@@ -879,9 +1170,10 @@ are now shifted by a configurable lag, but they are not yet full vintage series
 with revision-aware histories. SEC enrichment can be used as a static
 cross-sectional prior, but it still does not constitute a true point-in-time
 fundamentals database. Transaction costs are more realistic than before, yet
-they remain stylized rather than venue-specific. The hedge sleeve approximates
-convex protection without live options data, and the robustness engine still
-depends on one underlying historical sample even when it slices that sample in
+they remain stylized rather than venue-specific. The hedge sleeve in the
+archived experiment approximates convex protection without live options data,
+and the robustness engine still depends on one underlying historical sample even
+when it slices that sample in
 multiple ways.
 
 Several additional threats deserve explicit acknowledgement. First, the design
@@ -896,39 +1188,64 @@ options implementation. Finally, the project deliberately leans on free or
 public data sources, which improves accessibility but necessarily limits
 point-in-time fidelity and market microstructure realism.
 
-The currently reported robustness summary is still based on a limited set of
-windows, even though the research runner has now been extended to support a
-denser 4--6 window design. The workshop interpretation should therefore be that
-the robustness engine is now part of the methodology, not that robustness has
-been exhaustively established across many independent market environments.
+A further caveat is benchmark fairness: although the rule-based and PPO
+baselines are designed to be strong and informative, their exact specification
+still influences comparative conclusions.
+Because the evaluation suite reports many metrics and comparator strategies,
+some apparent wins and losses should also be interpreted with the usual caution
+around multiple comparisons.
+External validity is also limited: conclusions drawn from a daily U.S.-equity
+allocation setting may not transfer unchanged to other asset classes,
+frequencies, or market microstructure regimes.
+
+The currently reported robustness summary is still based on only six rolling
+windows drawn from one historical sample. The workshop interpretation should
+therefore be that the robustness engine is now part of the methodology, not
+that robustness has been exhaustively established across many independent market
+environments.
 
 Natural next steps include true filing-date-aware fundamentals, release-vintage
 macro datasets, cross-asset regime instruments, and a richer hedge sleeve using
-options or implied-volatility information. A second important line of follow-up
-work is empirical pruning: the LSTM sleeve and the pairs sleeve should remain in
-the architecture only if ablation continues to show incremental value after the
-expanded robustness pass. Finally, while the evaluation engine now includes
-bootstrap significance outputs, future work could push further toward formal
-Sharpe-ratio comparison tests, additional universes, and deeper cross-validation
-across disjoint market regimes.
+implied-volatility-conditioned option overlays such as protective puts, collars,
+and put spreads. A second important line of follow-up work is empirical pruning:
+the LSTM sleeve and the pairs sleeve should remain in the architecture only if
+ablation continues to show incremental value after the expanded robustness pass.
+Finally, while the evaluation engine now includes bootstrap significance
+outputs, future work could push further toward formal Sharpe-ratio comparison
+tests, additional universes, and deeper cross-validation across disjoint market
+regimes.
 
 \section{Conclusion}
 
-This project demonstrates that a financially grounded hybrid architecture can be
-both modular and effective. Classical quantitative models remain responsible for
-alpha discovery, while reinforcement learning acts as a sequential risk and
-allocation controller. The resulting system is not simply a benchmark chaser; it
-is a structured research pipeline whose behavior is interpretable, testable, and
-extensible. The main empirical takeaway is correspondingly narrow but meaningful:
-when RL is anchored to a strong finance-first alpha book and evaluated under
-explicit timing and cost assumptions, it can preserve much of the upside while
-improving downside control.
+This paper shows that a financially grounded hybrid architecture can be modular,
+interpretable, and empirically informative even when its RL layer does not beat
+the strongest finance-first baselines on top-line performance. Classical quantitative models remain
+responsible for alpha discovery, while reinforcement learning acts as a
+sequential risk and allocation controller. The resulting system is not a proof
+that RL dominates traditional quant methods. Instead, it is a structured
+research pipeline whose behavior is interpretable, testable, and falsifiable.
+The main empirical takeaway is accordingly narrow but meaningful: when RL is
+anchored to a strong finance-first alpha book and evaluated under explicit
+timing and cost assumptions, it can improve downside control relative to passive
+exposure and outperform end-to-end RL on point estimates, even if strong
+factor-first and rule-based baselines still set a higher bar on pure Sharpe and
+return. Equally importantly, the paper leaves behind a frozen-bundle evaluation
+protocol that can support future pruning, hedge redesign, and options-based
+extensions under a consistent empirical standard. In the reported sample, the
+evidence supports RL as a disciplined control overlay for downside shaping and
+rejects the stronger claim that RL already surpasses the best finance-first or
+rule-based alternatives on return and Sharpe.
 
 \appendix
 
 \section{Implementation Snapshot}
 
-\subsection{Current RL Control Ladders}
+\subsection{Archived Experiment Control Ladders}
+
+The March 2026 archived experiment bundle used in the main paper results relies
+on the discrete action ladders below. The live codebase now contains early
+scaffolding for implied-volatility-conditioned, option-style hedge selection,
+but those extensions are not yet part of the reported archived evaluation.
 
 \begin{center}
 \begin{tabular}{lcc}
@@ -959,24 +1276,57 @@ State 3 & 15\% \\
 
 \subsection{Research Artifacts}
 
-The research runner writes four additional artifacts alongside the standard
+For the archived run discussed in the paper, the research runner writes the
+artifacts below into
+\path{results/20260327_experiments/stock_trading/} alongside the standard
 pipeline figures:
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \texttt{research\_metrics.csv}: tabular output for ablation and robustness runs;
 \item \texttt{research\_ablation\_summary.csv}: split-aggregated ablation summaries;
 \item \texttt{research\_robustness\_summary.csv}: rolling-window comparison statistics;
 \item \texttt{research\_regime\_summary.csv}: regime-conditioned action and return summaries;
-\item \texttt{research\_rolling\_references.csv}: rolling benchmark metrics for SPY and the factor benchmark;
+\item \texttt{research\_rolling\_references.csv}: rolling benchmark metrics for SPY and the factor-only benchmark;
 \item \texttt{research\_bootstrap\_cis.csv}: block-bootstrap confidence intervals for key strategy metrics;
 \item \texttt{research\_bootstrap\_significance.csv}: pairwise bootstrap deltas and $p$-value summaries versus benchmark strategies;
 \item \texttt{research\_summary.json}: serialized configuration and best-per-suite summaries; and
-\item \texttt{research\_paper\_tables.tex} and \texttt{pipeline\_research\_eval.png}: paper-ready summary tables and figure.
+\item \texttt{research\_paper\_tables.tex} together with
+      \texttt{pipeline\_research\_eval.png}: paper-ready summary tables and
+      figure.
 \end{enumerate}
 
 Together with the feature-availability contract embedded in each backtest run,
 these artifacts make it easier to compare results across alternative timing,
 cost, and control assumptions without manually reconstructing the experimental
 context after the fact.
+
+\subsection{Supplementary Diagnostic Figures}
+
+These figures are diagnostic and illustrative; the primary evidentiary claims
+of the paper rest on Tables~\ref{tab:metrics}--\ref{tab:bootstrap_significance}
+and Figures~\ref{fig:research} and \ref{fig:rollingwindows}. The appendix also
+intentionally omits the older RL dashboard with embedded performance text,
+because those annotations reflect an exploratory live run rather than the frozen
+archived bundle analyzed in the paper.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{pipeline_alpha_models.png}
+\caption{Supplementary alpha diagnostics for the archived bundle. The figure is
+diagnostic rather than primary evidence and is consistent with the paper's
+pruning conclusion that the factor core carries most of the demonstrable alpha
+value in the current evaluation.}
+\label{fig:alpha}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{pipeline_execution_rl_paper.png}
+\caption{Supplementary execution diagnostic for the archived execution
+submodule. The figure illustrates turnover management, no-trade band
+activations, and stylized transaction-cost behavior, but it is not treated as a
+primary claim about live trading execution realism.}
+\label{fig:execution}
+\end{figure}
 
 \begin{thebibliography}{99}
 
@@ -985,10 +1335,39 @@ R. Almgren and N. Chriss.
 \newblock Optimal execution of portfolio transactions.
 \newblock \emph{Journal of Risk}, 3(2):5--39, 2000.
 
+\bibitem{buehler2019}
+H. Buehler, L. Gonon, J. Teichmann, and B. Wood.
+\newblock Deep hedging.
+\newblock \emph{Quantitative Finance}, 19(8):1271--1291, 2019.
+
 \bibitem{bollerslev1986}
 T. Bollerslev.
 \newblock Generalized autoregressive conditional heteroskedasticity.
 \newblock \emph{Journal of Econometrics}, 31(3):307--327, 1986.
+
+\bibitem{chen2021}
+L. Chen, M. Pelger, and J. Zhu.
+\newblock Deep learning in asset pricing.
+\newblock \emph{SSRN Working Paper 3350138}, revised 2021.
+
+\bibitem{cong2021}
+Y. Cong, B. Deng, X. Bao, and H. Dai.
+\newblock AlphaPortfolio: Direct construction through deep reinforcement learning
+  and interpretable representation learning.
+\newblock \emph{Proceedings of the AAAI Conference on Artificial Intelligence},
+  35(6):4831--4839, 2021.
+
+\bibitem{deng2017}
+Y. Deng, F. Bao, Y. Kong, Z. Ren, and Q. Dai.
+\newblock Deep direct reinforcement learning for financial signal representation
+  and trading.
+\newblock \emph{IEEE Transactions on Neural Networks and Learning Systems},
+  28(3):653--664, 2017.
+
+\bibitem{du2020}
+Y. Du, P. N. Kolm, A. Ritter, and T. Wang.
+\newblock Deep reinforcement learning for option replication and hedging.
+\newblock \emph{The Journal of Financial Data Science}, 2(4):44--59, 2020.
 
 \bibitem{engle1982}
 R. F. Engle.
@@ -1007,11 +1386,27 @@ E. F. Fama and K. R. French.
 \newblock Common risk factors in the returns on stocks and bonds.
 \newblock \emph{Journal of Financial Economics}, 33(1):3--56, 1993.
 
+\bibitem{giglio2022}
+S. Giglio, D. Xiu, and D. Zhang.
+\newblock Machine learning in asset pricing.
+\newblock \emph{Annual Review of Financial Economics}, 14:337--368, 2022.
+
+\bibitem{gu2020}
+S. Gu, B. Kelly, and D. Xiu.
+\newblock Empirical asset pricing via machine learning.
+\newblock \emph{Review of Financial Studies}, 33(5):2223--2273, 2020.
+
 \bibitem{hamilton1989}
 J. D. Hamilton.
 \newblock A new approach to the economic analysis of nonstationary time series
   and the business cycle.
 \newblock \emph{Econometrica}, 57(2):357--384, 1989.
+
+\bibitem{jander2025}
+J. Jander, H. H. Li, M. Schmid, and T. Pohl.
+\newblock Reinforcement learning in finance: From current practice to standards
+  and benchmarks.
+\newblock \emph{SSRN Working Paper 5703882}, 2025.
 
 \bibitem{jegadeesh1993}
 N. Jegadeesh and S. Titman.
@@ -1019,10 +1414,56 @@ N. Jegadeesh and S. Titman.
   market efficiency.
 \newblock \emph{Journal of Finance}, 48(1):65--91, 1993.
 
+\bibitem{jiang2017}
+Z. Jiang, D. Xu, and J. Liang.
+\newblock A deep reinforcement learning framework for the financial portfolio
+  management problem.
+\newblock \emph{arXiv preprint arXiv:1706.10059}, 2017.
+
+\bibitem{kolm2019}
+P. N. Kolm and G. Ritter.
+\newblock Modern perspectives on reinforcement learning in finance.
+\newblock \emph{SSRN Working Paper 3449401}, 2019.
+
+\bibitem{kolm2019hedge}
+P. N. Kolm and G. Ritter.
+\newblock Dynamic replication and hedging: A reinforcement learning approach.
+\newblock \emph{The Journal of Financial Data Science}, 1(4):159--171, 2019.
+
+\bibitem{moody2001}
+J. Moody and M. Saffell.
+\newblock Learning to trade via direct reinforcement.
+\newblock \emph{IEEE Transactions on Neural Networks}, 12(4):875--889, 2001.
+
+\bibitem{nevmyvaka2006}
+Y. Nevmyvaka, Y. Feng, and M. Kearns.
+\newblock Reinforcement learning for optimized trade execution.
+\newblock In \emph{Proceedings of the 23rd International Conference on Machine
+  Learning}, pages 673--680, 2006.
+
+\bibitem{pacheco2023}
+D. Pacheco Aznar.
+\newblock Portfolio management: A deep distributional reinforcement learning
+  approach.
+\newblock \emph{SSRN Working Paper 4522084}, 2023.
+
+\bibitem{sun2023}
+S. Sun, M. Qin, W. Zhang, H. Xia, C. Zong, J. Ying, Y. Xie, L. Zhao,
+  X. Wang, and B. An.
+\newblock TradeMaster: A holistic quantitative trading platform empowered by
+  reinforcement learning.
+\newblock In \emph{Advances in Neural Information Processing Systems 36:
+  Datasets and Benchmarks Track}, 2023.
+
 \bibitem{sutton2018}
 R. S. Sutton and A. G. Barto.
 \newblock \emph{Reinforcement Learning: An Introduction}.
 \newblock MIT Press, Cambridge, MA, second edition, 2018.
+
+\bibitem{zhang2020}
+Z. Zhang, S. Zohren, and S. Roberts.
+\newblock Deep reinforcement learning for trading.
+\newblock \emph{The Journal of Financial Data Science}, 2(2):25--40, 2020.
 
 \end{thebibliography}
 

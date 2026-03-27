@@ -12,6 +12,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy import stats as sp_stats
 
 from .config import EvaluationConfig, ExperimentConfig, PipelineConfig, RISK_FREE_RATE
 from .pipeline import run_full_pipeline
@@ -197,6 +198,114 @@ def _compute_bootstrap_pairwise_significance(
     return pd.DataFrame(rows)
 
 
+def _jobson_korkie_test(
+    returns_a: np.ndarray,
+    returns_b: np.ndarray,
+) -> dict[str, float]:
+    """
+    Test whether two Sharpe ratios differ significantly.
+    Jobson-Korkie (1981) with Memmel (2003) correction for correlation.
+    Returns test statistic and two-sided p-value.
+    """
+    n = min(len(returns_a), len(returns_b))
+    if n < 30:
+        return {'jk_stat': 0.0, 'jk_pvalue': 1.0}
+    ra, rb = returns_a[-n:], returns_b[-n:]
+    mu_a, mu_b = float(ra.mean()), float(rb.mean())
+    sig_a, sig_b = float(ra.std()), float(rb.std())
+    rho = float(np.corrcoef(ra, rb)[0, 1])
+    sharpe_a = mu_a / (sig_a + 1e-12)
+    sharpe_b = mu_b / (sig_b + 1e-12)
+    # Memmel (2003) asymptotic variance
+    v = (2.0 * (1.0 - rho)
+         + 0.5 * (sharpe_a ** 2 + sharpe_b ** 2
+                   - 2.0 * sharpe_a * sharpe_b * rho ** 2))
+    theta = (sharpe_a - sharpe_b) * np.sqrt(n) / (np.sqrt(v) + 1e-12)
+    pvalue = float(2.0 * (1.0 - sp_stats.norm.cdf(abs(theta))))
+    return {'jk_stat': float(theta), 'jk_pvalue': pvalue}
+
+
+def _compute_jobson_korkie_table(
+    path_map: dict[str, list[float] | np.ndarray],
+    base_label: str,
+    compare_labels: list[str],
+) -> pd.DataFrame:
+    """Run Jobson-Korkie for base vs each comparison strategy."""
+    if base_label not in path_map:
+        return pd.DataFrame()
+    base_rets = _daily_returns_from_path(path_map[base_label])
+    rows: list[dict] = []
+    for compare_label in compare_labels:
+        if compare_label not in path_map:
+            continue
+        cmp_rets = _daily_returns_from_path(path_map[compare_label])
+        result = _jobson_korkie_test(base_rets, cmp_rets)
+        rows.append({
+            'base_label': base_label,
+            'compare_label': compare_label,
+            **result,
+        })
+    return pd.DataFrame(rows)
+
+
+def _run_time_series_cv(
+    prices: pd.DataFrame,
+    volumes: pd.DataFrame,
+    returns: pd.DataFrame,
+    macro_data: pd.DataFrame,
+    sec_quality_scores: pd.Series,
+    base_config: PipelineConfig,
+    n_folds: int,
+) -> pd.DataFrame:
+    """Blocked time-series cross-validation: n_folds expanding-window splits."""
+    n = len(returns)
+    fold_rows: list[dict] = []
+    min_train = max(504, int(n * 0.3))
+    test_size = (n - min_train) // n_folds
+    if test_size < 126:
+        print(f"  ts_cv: not enough data for {n_folds} folds (n={n}), skipping.")
+        return pd.DataFrame()
+
+    for fold in range(n_folds):
+        train_end_idx = min_train + fold * test_size
+        test_end_idx = min(train_end_idx + test_size, n)
+        if test_end_idx <= train_end_idx:
+            continue
+        fold_returns = returns.iloc[:test_end_idx]
+        fold_prices = prices.loc[fold_returns.index]
+        fold_volumes = volumes.loc[fold_returns.index]
+        fold_macro = (macro_data.loc[fold_returns.index]
+                      if not macro_data.empty else pd.DataFrame(index=fold_returns.index))
+
+        fold_config = copy.deepcopy(base_config)
+        fold_config.train_frac = train_end_idx / test_end_idx
+        fold_config.experiment.label = f'ts_cv_fold_{fold}'
+        fold_config.enable_e2e_baseline = False
+
+        print(f"\n  ts_cv fold {fold + 1}/{n_folds}: "
+              f"train {fold_returns.index[0].date()}–{fold_returns.index[train_end_idx - 1].date()}, "
+              f"test {fold_returns.index[train_end_idx].date()}–{fold_returns.index[test_end_idx - 1].date()}")
+        try:
+            results = run_full_pipeline(
+                fold_prices, fold_volumes, fold_returns,
+                macro_data=fold_macro,
+                sec_quality_scores=sec_quality_scores,
+                config=fold_config,
+            )
+            row = _path_metric_summary(results['wealth'], f'ts_cv_fold_{fold}')
+            row.update({
+                'suite': 'ts_cv',
+                'fold': fold,
+                'train_end': str(fold_returns.index[train_end_idx - 1].date()),
+                'test_end': str(fold_returns.index[test_end_idx - 1].date()),
+            })
+            fold_rows.append(row)
+        except Exception as exc:
+            print(f"  ts_cv fold {fold} failed: {exc}")
+
+    return pd.DataFrame(fold_rows)
+
+
 def _rolling_starts(
     n_obs: int,
     window_days: int,
@@ -238,11 +347,15 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     beliefs = np.asarray(results.get('regime_beliefs', []), dtype=float)
     actions = np.asarray(results.get('actions', []), dtype=int)
     hedge_actions = np.asarray(results.get('hedge_actions', []), dtype=int)
+    hedge_type_actions = np.asarray(results.get('hedge_type_actions', []), dtype=int)
     turnover = np.asarray(results.get('turnover', []), dtype=float)
     hedge_ratios = np.asarray(results.get('hedge_ratios', []), dtype=float)
+    hedge_costs = np.asarray(results.get('hedge_costs', []), dtype=float)
+    hedge_benefits = np.asarray(results.get('hedge_benefits', []), dtype=float)
     cash_weights = np.asarray(results.get('cash_weights', []), dtype=float)
     tx_costs = np.asarray(results.get('transaction_costs', []), dtype=float)
     uncertainty = np.asarray(results.get('uncertainty_score', []), dtype=float)
+    hedge_types = np.asarray(results.get('hedge_types', []), dtype=object)
     wealth_rets = _daily_returns_from_path(results.get('wealth', []))
 
     if len(beliefs) == 0:
@@ -252,21 +365,29 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
         len(beliefs),
         len(actions),
         len(hedge_actions),
+        len(hedge_type_actions) if len(hedge_type_actions) > 0 else len(beliefs),
         len(turnover),
         len(wealth_rets),
         len(hedge_ratios),
+        len(hedge_costs) if len(hedge_costs) > 0 else len(beliefs),
+        len(hedge_benefits) if len(hedge_benefits) > 0 else len(beliefs),
         len(cash_weights),
         len(tx_costs),
         len(uncertainty),
+        len(hedge_types) if len(hedge_types) > 0 else len(beliefs),
     )
     beliefs = beliefs[:n_obs]
     actions = actions[:n_obs]
     hedge_actions = hedge_actions[:n_obs]
+    hedge_type_actions = hedge_type_actions[:n_obs] if len(hedge_type_actions) > 0 else np.zeros(n_obs, dtype=int)
     turnover = turnover[:n_obs]
     hedge_ratios = hedge_ratios[:n_obs]
+    hedge_costs = hedge_costs[:n_obs] if len(hedge_costs) > 0 else np.zeros(n_obs, dtype=float)
+    hedge_benefits = hedge_benefits[:n_obs] if len(hedge_benefits) > 0 else np.zeros(n_obs, dtype=float)
     cash_weights = cash_weights[:n_obs]
     tx_costs = tx_costs[:n_obs]
     uncertainty = uncertainty[:n_obs]
+    hedge_types = hedge_types[:n_obs] if len(hedge_types) > 0 else np.array(['none'] * n_obs, dtype=object)
     wealth_rets = wealth_rets[:n_obs]
 
     regime_masks = {
@@ -279,12 +400,18 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     for regime, mask in regime_masks.items():
         if mask.sum() == 0:
             continue
+        regime_hedge_types = hedge_types[mask]
+        dominant_hedge_type = str(pd.Series(regime_hedge_types).mode().iloc[0]) if len(regime_hedge_types) > 0 else 'none'
         rows.append({
             'label': results.get('experiment_label', 'unknown'),
             'regime': regime,
             'avg_action': float(actions[mask].mean()),
             'avg_hedge_action': float(hedge_actions[mask].mean()),
+            'avg_hedge_type_action': float(hedge_type_actions[mask].mean()),
+            'dominant_hedge_type': dominant_hedge_type,
             'avg_hedge_ratio': float(hedge_ratios[mask].mean()),
+            'avg_hedge_cost': float(hedge_costs[mask].mean()),
+            'avg_hedge_benefit': float(hedge_benefits[mask].mean()),
             'avg_cash_weight': float(cash_weights[mask].mean()),
             'avg_turnover': float(turnover[mask].mean()),
             'avg_transaction_cost': float(tx_costs[mask].mean()),
@@ -398,6 +525,28 @@ def build_ablation_suite(base_config: PipelineConfig) -> list[PipelineConfig]:
     full_pipeline.experiment = ExperimentConfig(label='full_pipeline')
     configs.append(full_pipeline)
 
+    # ---- State-feature ablations (RQ: which state info does RL actually use?) ----
+    no_uncertainty = copy.deepcopy(base_config)
+    no_uncertainty.experiment = ExperimentConfig(
+        label='full_no_uncertainty',
+        use_uncertainty_state=False,
+    )
+    configs.append(no_uncertainty)
+
+    no_regime = copy.deepcopy(base_config)
+    no_regime.experiment = ExperimentConfig(
+        label='full_no_regime',
+        use_regime_state=False,
+    )
+    configs.append(no_regime)
+
+    no_vol = copy.deepcopy(base_config)
+    no_vol.experiment = ExperimentConfig(
+        label='full_no_vol',
+        use_vol_state=False,
+    )
+    configs.append(no_vol)
+
     return configs
 
 
@@ -414,6 +563,9 @@ def _display_label(label: str) -> str:
         'alpha_plus_portfolio_rl': 'Alpha +\nPortfolio RL',
         'alpha_plus_hedge_rl': 'Alpha +\nHedge RL',
         'full_pipeline': 'Full\nPipeline',
+        'full_no_uncertainty': 'Full\n(no uncert.)',
+        'full_no_regime': 'Full\n(no regime)',
+        'full_no_vol': 'Full\n(no vol)',
         'SPY': 'SPY',
         'factor_benchmark': 'Factor Bench',
         'vol_target': 'Vol-Target',
@@ -1235,6 +1387,43 @@ def run_research_evaluation(
             block_size=evaluation_config.bootstrap_block_size,
             seed=evaluation_config.bootstrap_seed,
         )
+
+    # Jobson-Korkie Sharpe ratio equality test
+    jk_table = pd.DataFrame()
+    if baseline_results is not None:
+        jk_table = _compute_jobson_korkie_table(
+            path_map=bootstrap_paths,
+            base_label='full_pipeline',
+            compare_labels=['SPY', 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
+        )
+        if not jk_table.empty:
+            jk_table.to_csv('stock_trading/research_jobson_korkie.csv', index=False)
+            print("\nJobson-Korkie Sharpe ratio tests:")
+            for _, row in jk_table.iterrows():
+                print(f"  Full Pipeline vs {row['compare_label']}: "
+                      f"JK stat={row['jk_stat']:.3f}, p={row['jk_pvalue']:.4f}")
+
+    # Time-series cross-validation
+    ts_cv_results = pd.DataFrame()
+    if evaluation_config.enable_ts_cv:
+        print("\n--- Time-Series Cross-Validation ---")
+        ts_cv_results = _run_time_series_cv(
+            prices, volumes, returns, macro_data, sec_quality_scores,
+            base_config, evaluation_config.ts_cv_folds,
+        )
+        if not ts_cv_results.empty:
+            ts_cv_results.to_csv('stock_trading/research_ts_cv.csv', index=False)
+            print(f"\n  TS-CV Summary ({len(ts_cv_results)} folds):")
+            print(f"    Sharpe: {ts_cv_results['sharpe'].mean():.2f} "
+                  f"± {ts_cv_results['sharpe'].std():.2f}")
+            print(f"    Calmar: {ts_cv_results['calmar'].mean():.2f} "
+                  f"± {ts_cv_results['calmar'].std():.2f}")
+            print(f"    MaxDD:  {ts_cv_results['max_drawdown'].mean():.1%} "
+                  f"± {ts_cv_results['max_drawdown'].std():.1%}")
+            # Add CV rows to main metrics
+            for _, row in ts_cv_results.iterrows():
+                metric_rows.append(dict(row))
+            metrics = pd.DataFrame(metric_rows)
 
     metrics.to_csv('stock_trading/research_metrics.csv', index=False)
     regime_summary.to_csv('stock_trading/research_regime_summary.csv', index=False)
