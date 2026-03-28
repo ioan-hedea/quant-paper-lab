@@ -1,54 +1,109 @@
-# Sequential Decision-Making
+# Quant Paper Lab
 
-This repository collects course and research-style implementations across reinforcement learning, planning, control, verification, and quantitative trading. The strongest end-to-end artifact in the repo is the modular quant pipeline in [`stock_trading`](stock_trading), which combines classical alpha models with reinforcement-learning-based portfolio control, execution, and hedging.
+This repository contains a research-style quantitative trading pipeline and the associated paper artifacts.
 
-## Repository Map
+## Repository Layout
 
-- [`stock_trading`](stock_trading): quantitative trading experiments, including the modular `quant_stack` pipeline and generated figures.
-- [`depp_rl`](depp_rl): tabular and deep RL assignments, skeletons, and recorded training artifacts.
-- [`mdp_dp`](mdp_dp): dynamic-programming visualizations for value iteration and policy iteration.
-- [`pomdp`](pomdp): belief-space POMDP examples and visualizations.
-- [`pomcp`](pomcp): online Monte Carlo planning examples such as Tiger and RockSample.
-- [`model_based_rl`](model_based_rl): model-based RL visualization material.
-- [`bayesian_rl`](bayesian_rl): Bayesian bandits and Thompson sampling illustrations.
-- [`safe_rl`](safe_rl): safe RL and robust/constrained MDP visualizations.
-- [`verification`](verification): reachability, BMC, and verification-oriented figures.
-- [`mpc`](mpc): MPC coursework, figures, and report artifacts.
-- [`irl`](irl): inverse RL, neural certificates, and SMT-based components.
+- `quant_stack/`: modular pipeline package (`data`, `alpha`, `rl`, `pipeline`, `evaluation`, `plots`).
+- `quant_pipeline.py`: main pipeline entrypoint.
+- `quant_research.py`: ablation and robustness evaluation entrypoint.
+- `paper/1col/`: single-column paper source and build artifacts.
+- `paper/2col/`: two-column paper source, paper-ready tables, and build artifacts.
+- `results/`, `logs/`, `checkpoints/`: run artifacts and progress state.
 
-## Quant Pipeline Quick Start
+## Environment Setup
 
-The cleaned trading pipeline keeps the existing run command:
+### Option A: Manual venv creation
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib uv run python stock_trading/quant_pipeline.py
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-Optional data enrichments:
+Optional end-to-end RL extras:
+
+```bash
+python -m pip install -r requirements-e2e.txt
+```
+
+### Option B: One-command bootstrap
+
+```bash
+bash scripts/bootstrap_venv.sh
+```
+
+With optional E2E extras:
+
+```bash
+bash scripts/bootstrap_venv.sh --with-e2e
+```
+
+## Run
+
+Baseline pipeline run:
+
+```bash
+source .venv/bin/activate
+MPLCONFIGDIR=/tmp/matplotlib python quant_pipeline.py
+```
+
+With optional macro and SEC enrichment:
 
 ```bash
 FRED_API_KEY="your_key" \
 SEC_USER_AGENT="Your Name your_email@example.com" \
 MPLCONFIGDIR=/tmp/matplotlib \
-uv run python stock_trading/quant_pipeline.py
+python quant_pipeline.py
 ```
 
-More detailed usage, architecture notes, and file-level documentation live in [`stock_trading/README.md`](stock_trading/README.md).
+Research evaluation run:
 
-## Quant Pipeline Structure
+```bash
+source .venv/bin/activate
+MPLCONFIGDIR=/tmp/matplotlib python quant_research.py
+```
 
-The large trading script has been split into a small package under [`stock_trading/quant_stack`](stock_trading/quant_stack):
+Follow latest research log:
 
-- [`config.py`](stock_trading/quant_stack/config.py): universe, macro series, and runtime constants.
-- [`data.py`](stock_trading/quant_stack/data.py): market, macro, and SEC loaders.
-- [`alpha.py`](stock_trading/quant_stack/alpha.py): factor, pairs, GARCH, HMM, LSTM, and alpha-combination logic.
-- [`rl.py`](stock_trading/quant_stack/rl.py): portfolio, execution, and hedging RL agents.
-- [`pipeline.py`](stock_trading/quant_stack/pipeline.py): walk-forward backtest orchestration.
-- [`plots.py`](stock_trading/quant_stack/plots.py): performance, diagnostics, and execution figures.
-- [`main.py`](stock_trading/quant_stack/main.py): CLI entrypoint used by the thin wrapper in [`quant_pipeline.py`](stock_trading/quant_pipeline.py).
+```bash
+tail -f logs/latest_quant_research.log
+```
 
-## Notes
+## Outputs
 
-- The repo mixes lightweight demos and richer research prototypes; not every folder follows the same packaging style.
-- The quant pipeline is backtest-oriented and should still be treated as research code, not production trading software.
-- Generated plots in [`stock_trading`](stock_trading) document the latest run, but they are only as realistic as the underlying data and lag assumptions.
+Pipeline run generates, among others:
+
+- `pipeline_alpha_models.png`
+- `pipeline_performance.png`
+- `pipeline_rl_analysis.png`
+- `pipeline_execution_rl.png`
+
+Research run generates, among others:
+
+- `research_metrics.csv`
+- `research_ablation_summary.csv`
+- `research_robustness_summary.csv`
+- `research_regime_summary.csv`
+- `research_rolling_references.csv`
+- `research_summary.json`
+- `paper/2col/research_paper_tables.tex`
+- `pipeline_research_eval.png`
+
+## Paper Files
+
+- 1-column source: `paper/1col/quant_pipeline_report.tex`
+- 2-column source: `paper/2col/quant_pipeline_report_2col.tex`
+- 2-column PDF: `paper/2col/quant_pipeline_paper.pdf`
+
+## Data Sources
+
+- Prices and volumes: `yfinance`
+- Macro (preferred): FRED (`FRED_API_KEY`)
+- Macro fallback: BLS + U.S. Treasury Fiscal Data
+- Fundamentals: SEC company facts (`SEC_USER_AGENT`)
+
+## Caveat
+
+This is research code and backtest infrastructure, not production trading software.

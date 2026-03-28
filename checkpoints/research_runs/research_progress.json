@@ -1,0 +1,16 @@
+{
+  "updated_at": "2026-03-28T16:38:54.768098",
+  "status": "running",
+  "total_runs": 53,
+  "completed_runs": 0,
+  "completed_run_keys": [],
+  "current_run": {
+    "ordinal": 1,
+    "total_runs": 53,
+    "suite": "ablation",
+    "label": "factor_only_tf0.40",
+    "run_key": "ablation_factor_only_tf0.40",
+    "include_e2e": false
+  },
+  "last_completed_run": null
+}
