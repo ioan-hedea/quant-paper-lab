@@ -1,5 +1,8 @@
 # Fdb version 4
-["pdflatex"] 1774644156.35834 "quant_pipeline_report.tex" "quant_pipeline_report.pdf" "quant_pipeline_report" 1774644159.57228 0
+["pdflatex"] 1774722121.57372 "quant_pipeline_report.tex" "quant_pipeline_report.pdf" "quant_pipeline_report" 1774722123.61429 0
+  "../../results/20260328_experiments/pipeline_research_eval.png" 1774720975.40407 375802 48d11013644bfbd2f14f5fbde5c4ce74 ""
+  "../../results/20260328_experiments/pipeline_reward_ablation.png" 1774720975.40911 122714 4cf0e7d9b6627ec4c6585c7e8f5f7d72 ""
+  "../../results/20260328_experiments/pipeline_rolling_windows.png" 1774720975.41231 108372 5123bb4406135e4d5c05a7c16ef48173 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/local/texlive/2026/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm" 1136768653 1292 bd42be2f344128bff6d35d98474adfe3 ""
@@ -197,14 +200,10 @@
   "/usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1774559586 5573038 b99aad5e4898a9034e953632f940512b ""
   "/usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt" 1774559565 3636777 0a7b50578c2b7fc786152af658ee57ff ""
   "/usr/local/texlive/2026/texmf.cnf" 1774209515 577 648cd9f92f9c0eac486f4c71c85cfbbe ""
-  "neurips_2025.sty" 1774643107.20678 1667 e6a4477dfb72a24e6de04350907eb318 ""
-  "pipeline_alpha_models.png" 1774292748.47943 879821 67b9f006af9fc6ee28040aa763b945e0 ""
-  "pipeline_execution_rl_paper.png" 1774644074.19315 244777 fa17d148ec883c5b7640a07994e7d197 ""
-  "quant_pipeline_report.aux" 1774644159.42863 13899 bc08114c1c74a541856a8b638eb93311 "pdflatex"
-  "quant_pipeline_report.out" 1774644159.43011 7576 d6c25226db539b3d37f80b3e313172bb "pdflatex"
-  "quant_pipeline_report.tex" 1774644145.92591 73065 729a320475c97938a58d82e16a858706 ""
-  "results/20260327_experiments/stock_trading/pipeline_research_eval.png" 1774611674 350216 24c06b38a050f6cb9ca3fb05a948b9d4 ""
-  "results/20260327_experiments/stock_trading/pipeline_rolling_windows.png" 1774611674 111585 efb1d4696ffe23a29abccd84ae0d1314 ""
+  "neurips_2025.sty" 1774711704.81443 1667 e6a4477dfb72a24e6de04350907eb318 ""
+  "quant_pipeline_report.aux" 1774722123.51232 12905 3b494b808c8401d86e39c7bc342b794f "pdflatex"
+  "quant_pipeline_report.out" 1774722123.51382 7157 96e40dab9c72ffc1657eab0e2f327e19 "pdflatex"
+  "quant_pipeline_report.tex" 1774722104.51142 69257 13957d7467b29444fb7e4507b7ba7b8d ""
   (generated)
   "quant_pipeline_report.aux"
   "quant_pipeline_report.log"

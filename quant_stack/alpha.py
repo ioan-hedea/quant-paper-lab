@@ -11,7 +11,7 @@ from statsmodels.regression.linear_model import OLS
 from statsmodels.tools import add_constant
 from statsmodels.tsa.stattools import adfuller, coint
 
-from .config import PAIRS_CANDIDATES, UNIVERSE
+from .config import PAIRS_CANDIDATES, TICKER_TO_GROUP, UNIVERSE
 
 class FamaFrenchFactors:
     """
@@ -478,14 +478,53 @@ class LSTMAlpha:
 
 class AlphaCombiner:
     """
-    Combine multiple alpha signals into a single expected return vector.
-    Adaptively reweights sources based on recent realized signal quality.
+    Combine the active alpha sleeves into a single expected-return vector.
+
+    The current architecture is intentionally simpler than the earlier stack:
+    the alpha layer is now factor-, GARCH-, and HMM-centered, and the combiner
+    can either use adaptive IC-weighting or fixed sleeve weights for ablations.
     """
     def __init__(self, lookback=60):
         self.lookback = lookback
-        self.base_weights = {'factor': 0.55, 'pairs': 0.25, 'lstm': 0.20}
+        self.base_weights = {'factor': 0.60, 'garch': 0.25, 'hmm': 0.15}
         self.source_skill = {source: 0.0 for source in self.base_weights}
         self.ic_history = {source: deque(maxlen=lookback) for source in self.base_weights}
+
+    @staticmethod
+    def _zscore(series: pd.Series) -> pd.Series:
+        s = pd.Series(series, copy=False).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        sigma = float(s.std())
+        if sigma < 1e-8:
+            return s * 0.0
+        return (s - float(s.mean())) / sigma
+
+    def _build_garch_signal(self, garch_vols: pd.Series, tickers: list[str]) -> pd.Series:
+        if len(garch_vols) == 0:
+            return pd.Series(0.0, index=tickers)
+        inv_vol = 1.0 / (garch_vols.reindex(tickers).fillna(garch_vols.mean()) + 1e-8)
+        return self._zscore(inv_vol)
+
+    def _build_hmm_signal(self, regime_belief: float, tickers: list[str]) -> pd.Series:
+        bull_bias = {
+            'technology': 1.00,
+            'communications': 0.85,
+            'consumer_disc': 0.80,
+            'financials': 0.60,
+            'industrials': 0.45,
+            'energy': 0.25,
+            'materials': 0.20,
+            'healthcare': -0.15,
+            'consumer_staples': -0.55,
+            'utilities': -0.75,
+            'real_estate': -0.35,
+            'diversifier': -0.85,
+        }
+        regime_scale = float(np.clip(2.0 * regime_belief - 1.0, -1.0, 1.0))
+        regime_pref = {
+            ticker: regime_scale * bull_bias.get(TICKER_TO_GROUP.get(ticker, ''), 0.0)
+            for ticker in tickers
+        }
+        return self._zscore(pd.Series(regime_pref, index=tickers, dtype=float))
 
     def get_source_weights(self, adaptive=True):
         raw = {}
@@ -498,8 +537,6 @@ class AlphaCombiner:
     def update_signal_quality(self, source_signals, realized_returns):
         for source, signals in source_signals.items():
             aligned = pd.concat([signals, realized_returns], axis=1).dropna()
-            if source != 'factor':
-                aligned = aligned[aligned.iloc[:, 0].abs() > 1e-8]
             if len(aligned) < 4:
                 continue
             sig = aligned.iloc[:, 0]
@@ -527,62 +564,40 @@ class AlphaCombiner:
     def combine(
         self,
         factor_scores,
-        pairs_signals,
         garch_vols,
         regime_belief,
-        lstm_preds,
         tickers,
         use_factor=True,
-        use_pairs=True,
-        use_lstm=True,
         adaptive=True,
     ):
         """
-        Weighted combination of all alpha sources.
+        Weighted combination of the factor, GARCH, and HMM sleeves.
         Returns: alpha score per ticker (z-score scale), confidence per ticker.
         """
         alpha = pd.Series(0.0, index=tickers)
         confidence = pd.Series(1.0, index=tickers)
+        factor_signal = factor_scores.reindex(tickers).fillna(0.0) if use_factor else pd.Series(0.0, index=tickers)
+        garch_signal = self._build_garch_signal(garch_vols, tickers)
+        hmm_signal = self._build_hmm_signal(regime_belief, tickers)
         source_signals = {
-            'factor': factor_scores.reindex(tickers).fillna(0.0) if use_factor else pd.Series(0.0, index=tickers),
-            'pairs': pd.Series(pairs_signals, dtype=float).reindex(tickers).fillna(0.0) if use_pairs else pd.Series(0.0, index=tickers),
-            'lstm': pd.Series(lstm_preds, dtype=float).reindex(tickers).fillna(0.0) * 100 if use_lstm else pd.Series(0.0, index=tickers),
+            'factor': factor_signal,
+            'garch': garch_signal,
+            'hmm': hmm_signal,
         }
         source_weights = self.get_source_weights(adaptive=adaptive)
 
-        for ticker in tickers:
-            signals = []
-            weights = []
+        raw_alpha = (
+            source_weights['factor'] * source_signals['factor']
+            + source_weights['garch'] * source_signals['garch']
+            + source_weights['hmm'] * source_signals['hmm']
+        )
+        alpha.loc[:] = raw_alpha.values
 
-            # Factor model — z-score directly as alpha
-            if use_factor and ticker in factor_scores.index:
-                signals.append(source_signals['factor'][ticker])
-                weights.append(source_weights['factor'])
-
-            # Pairs signal — already directional (-1, 0, +1 scale)
-            if use_pairs and ticker in pairs_signals:
-                signals.append(source_signals['pairs'][ticker])
-                weights.append(source_weights['pairs'])
-
-            # LSTM — rescale small return prediction to z-score scale
-            if use_lstm and ticker in lstm_preds:
-                signals.append(source_signals['lstm'][ticker])  # e.g. 0.003 → 0.3
-                weights.append(source_weights['lstm'])
-
-            # Regime adjustment: scale down in bear, up in bull
-            regime_scale = 0.6 + 0.4 * regime_belief  # 0.6 in bear, 1.0 in bull
-
-            if signals:
-                w = np.array(weights)
-                w /= w.sum()
-                raw_alpha = sum(s * ww for s, ww in zip(signals, w))
-                alpha[ticker] = raw_alpha * regime_scale
-
-                # Confidence: inverse-vol weighting (vol-target each name)
-                if ticker in garch_vols.index and garch_vols[ticker] > 1e-6:
-                    target_vol = 0.15 / np.sqrt(252)  # target ~15% ann. vol per name
-                    confidence[ticker] = target_vol / garch_vols[ticker]
-                    confidence[ticker] = np.clip(confidence[ticker], 0.3, 3.0)
+        # Confidence remains a volatility-aware scaling of the target book.
+        if len(garch_vols) > 0:
+            aligned_garch = garch_vols.reindex(tickers).fillna(garch_vols.mean())
+            target_vol = 0.15 / np.sqrt(252)
+            confidence = (target_vol / (aligned_garch + 1e-8)).clip(lower=0.3, upper=3.0)
 
         return alpha, confidence, source_signals, source_weights
 

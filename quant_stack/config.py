@@ -226,15 +226,15 @@ class ExperimentConfig:
 
     label: str = 'full_pipeline'
     use_factor: bool = True
-    use_pairs: bool = True
-    use_lstm: bool = True
+    use_pairs: bool = False
+    use_lstm: bool = False
     adaptive_combiner: bool = True
     use_portfolio_rl: bool = True
-    use_hedge_rl: bool = True
+    use_hedge_rl: bool = False
     # State-feature ablation toggles
-    use_uncertainty_state: bool = True
-    use_regime_state: bool = True
-    use_vol_state: bool = True
+    use_uncertainty_state: bool = False
+    use_regime_state: bool = False
+    use_vol_state: bool = False
 
 
 @dataclass
@@ -245,7 +245,7 @@ class PipelineConfig:
     rebalance_band: float = 0.015
     min_turnover: float = 0.08
     hedge_ratios: tuple[float, ...] = (0.0, 0.03, 0.08, 0.15)
-    portfolio_reward_mode: str = 'differential_sharpe'
+    portfolio_reward_mode: str = 'sortino'
     hedge_reward_mode: str = 'asymmetric_return'
     e2e_reward_mode: str = 'differential_sharpe'
     enable_e2e_baseline: bool = True

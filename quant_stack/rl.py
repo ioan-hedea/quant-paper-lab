@@ -14,14 +14,16 @@ from .config import OptimizerConfig, OptionOverlayConfig, TICKER_TO_GROUP
 
 class PortfolioConstructionRL:
     """
-    RL agent that decides portfolio weights given alpha signals.
+    RL agent that decides how aggressively to express an allocator book.
 
-    State: (cross-sectional alpha opportunity, current volatility, regime)
-    Action: total risk budget allocation (how aggressively to follow signals)
-    Reward: Sharpe ratio of portfolio
+    State summaries are derived from:
+    - alpha scores,
+    - current portfolio weights,
+    - recent return history.
 
-    This is the key insight: RL doesn't generate alpha, it decides
-    HOW MUCH to bet on each alpha signal given the current conditions.
+    Actions control the invested fraction and active-overlay size around the
+    allocator's target book. The agent is therefore a controller, not an alpha
+    generator.
     """
     def __init__(
         self,
@@ -47,23 +49,52 @@ class PortfolioConstructionRL:
         # RL now mostly adjusts total exposure and a small active overlay
         # around a factor-anchored target book.
         self.invest_fractions = [0.82, 0.90, 0.95, 0.98, 1.00]
-        self.tilt_fractions = [0.05, 0.08, 0.12, 0.16, 0.20]
+        self.overlay_sizes = [0.05, 0.08, 0.12, 0.16, 0.20]
 
     def get_state(
         self,
-        alpha_opportunity: float,
-        portfolio_vol: float,
-        regime_belief: float,
-        uncertainty_score: float = 0.0,
+        alpha_scores: pd.Series,
+        portfolio_weights: pd.Series | None,
+        recent_returns: pd.DataFrame | pd.Series | None,
     ) -> tuple[int, int, int, int]:
-        """Discretize continuous state."""
-        alpha_bin = int(np.clip(np.digitize(alpha_opportunity,
-                        [0.25, 0.60, 1.00, 1.50]), 0, 4))
-        vol_bin = int(np.clip(np.digitize(portfolio_vol,
-                      [0.008, 0.012, 0.016, 0.022]), 0, 4))
-        regime_bin = int(regime_belief > 0.5)
-        uncertainty_bin = int(np.clip(np.digitize(uncertainty_score, [0.20, 0.35, 0.55, 0.75]), 0, 4))
-        return (alpha_bin, vol_bin, regime_bin, uncertainty_bin)
+        """Discretize the allocator state from alpha, book shape, and realized path."""
+        alpha_scores = pd.Series(alpha_scores, copy=False).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        if len(alpha_scores) == 0:
+            alpha_spread = 0.0
+        else:
+            k = max(1, min(3, len(alpha_scores)))
+            alpha_spread = float(alpha_scores.nlargest(k).mean() - alpha_scores.nsmallest(k).mean())
+
+        if portfolio_weights is None or len(portfolio_weights) == 0:
+            invested_fraction = 0.0
+            concentration = 0.0
+        else:
+            weights = pd.Series(portfolio_weights, copy=False).fillna(0.0).clip(lower=0.0)
+            invested_fraction = float(weights.sum())
+            normalized = weights / (invested_fraction + 1e-8)
+            concentration = float((normalized ** 2).sum())
+
+        if recent_returns is None or len(recent_returns) == 0:
+            trend = 0.0
+            realized_vol = 0.0
+        else:
+            if isinstance(recent_returns, pd.DataFrame):
+                path_proxy = recent_returns.mean(axis=1)
+            else:
+                path_proxy = pd.Series(recent_returns, copy=False)
+            path_proxy = path_proxy.dropna()
+            if len(path_proxy) == 0:
+                trend = 0.0
+                realized_vol = 0.0
+            else:
+                trend = float(path_proxy.tail(20).mean() * 252)
+                realized_vol = float(path_proxy.tail(20).std() * np.sqrt(252))
+
+        alpha_bin = int(np.clip(np.digitize(alpha_spread, [0.40, 0.80, 1.20, 1.80]), 0, 4))
+        invest_bin = int(np.clip(np.digitize(invested_fraction, [0.82, 0.90, 0.96, 0.995]), 0, 4))
+        trend_bin = int(np.clip(np.digitize(trend, [-0.10, 0.0, 0.08, 0.18]), 0, 4))
+        concentration_bin = int(np.clip(np.digitize(concentration, [0.10, 0.16, 0.24, 0.35]), 0, 4))
+        return (alpha_bin, invest_bin, trend_bin, concentration_bin)
 
     def select_action(self, state: tuple[int, int, int, int]) -> int:
         if np.random.random() < self.epsilon:
@@ -83,6 +114,13 @@ class PortfolioConstructionRL:
 
     def get_action_labels(self) -> list[str]:
         return [f'{frac:.0%}' for frac in self.invest_fractions]
+
+    def get_overlay_labels(self) -> list[str]:
+        return [f'{frac:.0%}' for frac in self.overlay_sizes]
+
+    def decode_action(self, action: int) -> tuple[float, float]:
+        idx = int(np.clip(action, 0, len(self.invest_fractions) - 1))
+        return self.invest_fractions[idx], self.overlay_sizes[idx]
 
     def apply_rebalance_band(
         self,
@@ -282,8 +320,7 @@ class PortfolioConstructionRL:
         The factor book is the main target; RL controls total exposure and the
         size of the active overlay around that target.
         """
-        invest_frac = self.invest_fractions[action]
-        tilt_frac = self.tilt_fractions[action]
+        invest_frac, overlay_size = self.decode_action(action)
 
         weighted_alpha = (alpha_scores * confidence).replace([np.inf, -np.inf], np.nan).fillna(0.0)
         optimized_target = self.optimize_target_book(
@@ -312,8 +349,8 @@ class PortfolioConstructionRL:
             alpha_scale = positive_alpha / (positive_alpha.max() + 1e-8)
             tilted_target = optimized_target * (1.0 + alpha_scale)
             satellite_weights = tilted_target / (tilted_target.sum() + 1e-8)
-        core_budget = invest_frac * (1.0 - tilt_frac)
-        satellite_budget = invest_frac * tilt_frac
+        core_budget = invest_frac * (1.0 - overlay_size)
+        satellite_budget = invest_frac * overlay_size
         core_weights = optimized_target * core_budget
 
         weights = core_weights + satellite_weights * satellite_budget
@@ -322,6 +359,27 @@ class PortfolioConstructionRL:
         cash_weight = max(0.0, 1.0 - invest_frac)
 
         return weights, cash_weight
+
+    def construct_allocator_only(
+        self,
+        factor_scores: pd.Series,
+        alpha_scores: pd.Series,
+        confidence: pd.Series,
+        recent_returns: pd.DataFrame | None = None,
+        prev_weights: pd.Series | None = None,
+    ) -> tuple[pd.Series, float]:
+        """
+        Build the constrained allocator book with no RL control layer.
+        This is the non-RL baseline corresponding to the simplified architecture.
+        """
+        weights = self.optimize_target_book(
+            factor_scores=factor_scores,
+            alpha_scores=alpha_scores,
+            confidence=confidence,
+            recent_returns=recent_returns,
+            prev_weights=prev_weights,
+        )
+        return weights, 0.0
 
 
 # --- 4B. Execution RL ---

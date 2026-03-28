@@ -63,10 +63,10 @@ def plot_alpha_models(results, prices, returns):
     source_weights = np.array(results['source_weights_hist'])
     if len(source_weights) > 0:
         ax.plot(dates, source_weights[:, 0], color='#2196F3', linewidth=1, label='Factor')
-        ax.plot(dates, source_weights[:, 1], color='#9C27B0', linewidth=1, label='Pairs')
-        ax.plot(dates, source_weights[:, 2], color='#FF9800', linewidth=1, label='LSTM')
+        ax.plot(dates, source_weights[:, 1], color='#9C27B0', linewidth=1, label='GARCH')
+        ax.plot(dates, source_weights[:, 2], color='#FF9800', linewidth=1, label='HMM')
         ax.fill_between(dates, source_weights[:, 0], 0, color='#2196F3', alpha=0.08)
-    ax.set_title('Adaptive Alpha Source Weights')
+    ax.set_title('Adaptive Alpha Sleeve Weights')
     ax.set_ylabel('Weight')
     ax.legend(fontsize=7)
     ax.grid(True, alpha=0.3)
@@ -85,32 +85,34 @@ def plot_alpha_models(results, prices, returns):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     ax.tick_params(axis='x', rotation=45)
 
-    # 6. RL risk level over time
+    # 6. Portfolio control over time
     ax = fig.add_subplot(gs[1, 2])
-    actions = np.array(results['actions'])
-    risk_names = results['portfolio_rl'].get_action_labels()
-    act_colors = ['#9E9E9E', '#4CAF50', '#2196F3', '#FF9800', '#F44336']
-    window = 20
-    if len(actions) > window:
-        for a in range(5):
-            freq = pd.Series((actions == a).astype(float)).rolling(window).mean()
-            ax.plot(dates[:len(freq)], freq.values, color=act_colors[a],
-                    linewidth=1, alpha=0.7, label=risk_names[a])
-    ax.set_title('RL Risk Budget Allocation')
-    ax.legend(fontsize=7)
-    ax.set_ylim(0, 1)
+    invested = np.array(results.get('invested_fractions', []), dtype=float)
+    overlay = np.array(results.get('overlay_sizes', []), dtype=float)
+    if len(invested) == len(dates):
+        ax.plot(dates, invested, color='#2196F3', linewidth=1.5, label='Invested fraction')
+        ax.fill_between(dates, invested, 0, color='#2196F3', alpha=0.15)
+    ax2 = ax.twinx()
+    if len(overlay) == len(dates):
+        ax2.plot(dates, overlay, color='#FF9800', linewidth=1.2, label='Active overlay size')
+    ax.set_title('Portfolio RL Control Outputs')
+    ax.set_ylabel('Invested fraction', color='#2196F3')
+    ax2.set_ylabel('Overlay size', color='#FF9800')
+    ax.legend(loc='upper left', fontsize=7)
+    ax2.legend(loc='upper right', fontsize=7)
+    ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     ax.tick_params(axis='x', rotation=45)
 
-    # 7. Hedging actions
+    # 7. Overlay size history
     ax = fig.add_subplot(gs[2, 0])
-    actual_hedge = np.array(results.get('effective_hedge_ratios', results.get('hedge_ratios', [])))
-    ax.fill_between(dates, actual_hedge, 0, color='#F44336', alpha=0.4)
-    ax.plot(dates, actual_hedge, color='#F44336', linewidth=0.8)
-    ax.set_title('Effective Option Hedge Ratio (RL)')
-    ax.set_ylabel('Hedge Fraction')
-    ymax = max(0.2, actual_hedge.max() * 1.2) if len(actual_hedge) > 0 else 0.2
+    overlay = np.array(results.get('overlay_sizes', []), dtype=float)
+    ax.fill_between(dates, overlay, 0, color='#F44336', alpha=0.3)
+    ax.plot(dates, overlay, color='#F44336', linewidth=0.8)
+    ax.set_title('Active Overlay Size')
+    ax.set_ylabel('Overlay Fraction')
+    ymax = max(0.2, overlay.max() * 1.2) if len(overlay) > 0 else 0.2
     ax.set_ylim(0, ymax)
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
@@ -132,7 +134,7 @@ def plot_alpha_models(results, prices, returns):
     iv_ann = np.array(results.get('iv_annualized', []), dtype=float)
     realized_vol = np.array(results.get('garch_vol_uncertainty', []), dtype=float)
     iv_pct = np.array(results.get('iv_percentile', []), dtype=float)
-    if len(iv_ann) == len(dates) and len(iv_ann) > 0:
+    if len(iv_ann) == len(dates) and len(iv_ann) > 0 and np.nanmax(np.abs(iv_ann)) > 1e-8:
         ax.plot(dates, iv_ann * 100, color='#6A1B9A', linewidth=1.5, label='Implied vol proxy')
         ax2 = ax.twinx()
         ax2.plot(dates, iv_pct, color='#009688', linewidth=1.0, alpha=0.8, label='IV percentile')
@@ -312,25 +314,31 @@ def plot_rl_analysis(results):
 
     dates = results['dates']
     actions = np.array(results['actions'])
+    invested = np.array(results.get('invested_fractions', []), dtype=float)
+    overlay = np.array(results.get('overlay_sizes', []), dtype=float)
     hedge_actions = np.array(results['hedge_actions'])
     hedge_type_actions = np.array(results.get('hedge_type_actions', []))
     beliefs = np.array(results['regime_beliefs'])
     dd = np.array(results['drawdowns'])
+    hedge_active = results.get('hedging_rl') is not None
 
-    # 1. RL action vs regime
+    # 1. RL exposure vs regime
     ax = axes[0, 0]
     ax2 = ax.twinx()
     risk_names = results['portfolio_rl'].get_action_labels()
-    ax.plot(dates, actions, '.', color='#2196F3', alpha=0.3, markersize=1)
-    rolling_action = pd.Series(actions).rolling(20).mean()
-    ax.plot(dates[:len(rolling_action)], rolling_action.values,
-            color='#2196F3', linewidth=2, label='Avg Risk Level')
+    overlay_names = results['portfolio_rl'].get_overlay_labels()
+    invested_series = invested if len(invested) == len(dates) else np.array([results['portfolio_rl'].decode_action(a)[0] for a in actions], dtype=float)
+    overlay_series = overlay if len(overlay) == len(dates) else np.array([results['portfolio_rl'].decode_action(a)[1] for a in actions], dtype=float)
+    ax.plot(dates, invested_series, color='#2196F3', linewidth=1.5, alpha=0.9, label='Invested fraction')
+    ax.fill_between(dates, invested_series, 0, color='#2196F3', alpha=0.15)
     ax2.plot(dates, beliefs, color='#F44336', linewidth=1, alpha=0.5, label='P(Bull)')
-    ax.set_ylabel('Risk Level', color='#2196F3')
-    ax2.set_ylabel('P(Bull)', color='#F44336')
-    ax.set_title('Portfolio RL: Risk Level vs Market Regime')
-    ax.set_yticks(range(5))
-    ax.set_yticklabels(risk_names, fontsize=7)
+    if len(overlay_series) == len(dates):
+        scaled_overlay = overlay_series / max(float(overlay_series.max()), 1e-8)
+        ax2.plot(dates, scaled_overlay, color='#FF9800', linewidth=1, alpha=0.7,
+                 linestyle='--', label='Overlay size (scaled)')
+    ax.set_ylabel('Invested fraction', color='#2196F3')
+    ax2.set_ylabel('Regime / scaled overlay', color='#F44336')
+    ax.set_title('Portfolio RL: Exposure and Overlay vs Market Regime')
     ax.legend(loc='upper left', fontsize=7)
     ax2.legend(loc='upper right', fontsize=7)
     ax.grid(True, alpha=0.3)
@@ -340,19 +348,27 @@ def plot_rl_analysis(results):
     # 2. Hedge ratio vs drawdown
     ax = axes[0, 1]
     actual_hedge = np.array(results.get('effective_hedge_ratios', results.get('hedge_ratios', [])))
-    ax.plot(dates, dd, color='#F44336', linewidth=1, alpha=0.6, label='Drawdown')
-    ax2 = ax.twinx()
-    ax2.fill_between(dates, actual_hedge, 0, color='#4CAF50', alpha=0.3, label='Hedge')
-    ax2.plot(dates, pd.Series(actual_hedge).rolling(10).mean(),
-             color='#4CAF50', linewidth=1.5)
-    ax.set_ylabel('Drawdown', color='#F44336')
-    ax2.set_ylabel('Hedge Ratio', color='#4CAF50')
-    ax.set_title('Hedging RL: Responds to Drawdowns')
-    ax.legend(loc='lower left', fontsize=7)
-    ax2.legend(loc='upper right', fontsize=7)
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-    ax.tick_params(axis='x', rotation=45)
+    if hedge_active:
+        ax.plot(dates, dd, color='#F44336', linewidth=1, alpha=0.6, label='Drawdown')
+        ax2 = ax.twinx()
+        ax2.fill_between(dates, actual_hedge, 0, color='#4CAF50', alpha=0.3, label='Hedge')
+        ax2.plot(dates, pd.Series(actual_hedge).rolling(10).mean(),
+                 color='#4CAF50', linewidth=1.5)
+        ax.set_ylabel('Drawdown', color='#F44336')
+        ax2.set_ylabel('Hedge Ratio', color='#4CAF50')
+        ax.set_title('Hedging RL: Responds to Drawdowns')
+        ax.legend(loc='lower left', fontsize=7)
+        ax2.legend(loc='upper right', fontsize=7)
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.tick_params(axis='x', rotation=45)
+    else:
+        ax.plot(dates, dd, color='#F44336', linewidth=1, alpha=0.7)
+        ax.set_title('No Hedge Controller in Current Architecture')
+        ax.set_ylabel('Drawdown')
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.tick_params(axis='x', rotation=45)
 
     # 3. Q-value heatmap for portfolio RL
     ax = axes[0, 2]
@@ -362,15 +378,15 @@ def plot_rl_analysis(results):
         q_matrix = np.array([portfolio_rl.Q[s] for s in states])
         im = ax.imshow(q_matrix.T, aspect='auto', cmap='RdYlGn')
         ax.set_xlabel('State Index')
-        ax.set_ylabel('Action (Risk Level)')
+        ax.set_ylabel('Action (Invested / Overlay)')
         ax.set_yticks(range(5))
-        ax.set_yticklabels(risk_names, fontsize=7)
+        ax.set_yticklabels([f'{risk_names[i]} / {overlay_names[i]}' for i in range(5)], fontsize=7)
         ax.set_title('Portfolio RL: Learned Q-Values')
         plt.colorbar(im, ax=ax, shrink=0.8)
     else:
         ax.text(0.5, 0.5, 'No Q-values learned', ha='center', va='center')
 
-    # 4. Action distribution by regime
+    # 4. Invested-fraction distribution by regime
     ax = axes[1, 0]
     bull_mask = beliefs > 0.6
     bear_mask = beliefs < 0.4
@@ -391,38 +407,56 @@ def plot_rl_analysis(results):
     ax.set_xticks(x + width)
     ax.set_xticklabels(risk_names, fontsize=7)
     ax.set_ylabel('Frequency')
-    ax.set_title('Action Distribution by Regime')
+    ax.set_title('Invested-Fraction Ladder by Regime')
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # 5. Hedge type distribution by IV regime
+    # 5. Overlay-size distribution by volatility regime
     ax = axes[1, 1]
     iv_pct = np.array(results.get('iv_percentile', []), dtype=float)
-    if len(iv_pct) == 0:
+    if len(iv_pct) == 0 or np.nanmax(np.abs(iv_pct)) < 1e-8:
         garch_arr = np.array(results['garch_vols'])
         avg_vol = garch_arr.mean(axis=1) if garch_arr.ndim > 1 else garch_arr
         iv_pct = (avg_vol > np.median(avg_vol)).astype(float)
     high_iv = iv_pct > np.median(iv_pct)
     low_iv = ~high_iv
 
-    type_names = results['hedging_rl'].get_type_labels()
-    x = np.arange(len(type_names))
-    for i, (mask, name, color) in enumerate([
-        (low_iv, 'Low IV', '#4CAF50'),
-        (high_iv, 'High IV', '#F44336'),
-    ]):
-        if mask.sum() > 0:
-            actions_for_mask = hedge_type_actions[mask] if len(hedge_type_actions) == len(mask) else np.zeros(mask.sum(), dtype=int)
-            counts = np.bincount(actions_for_mask, minlength=len(type_names))[:len(type_names)] / mask.sum()
-            ax.bar(x + i * 0.35, counts, 0.35, color=color,
-                   alpha=0.8, label=name, edgecolor='black')
+    if hedge_active:
+        type_names = results['hedging_rl'].get_type_labels()
+        x = np.arange(len(type_names))
+        for i, (mask, name, color) in enumerate([
+            (low_iv, 'Low IV', '#4CAF50'),
+            (high_iv, 'High IV', '#F44336'),
+        ]):
+            if mask.sum() > 0:
+                actions_for_mask = hedge_type_actions[mask] if len(hedge_type_actions) == len(mask) else np.zeros(mask.sum(), dtype=int)
+                counts = np.bincount(actions_for_mask, minlength=len(type_names))[:len(type_names)] / mask.sum()
+                ax.bar(x + i * 0.35, counts, 0.35, color=color,
+                       alpha=0.8, label=name, edgecolor='black')
 
-    ax.set_xticks(x + 0.175)
-    ax.set_xticklabels(type_names, rotation=15, fontsize=8)
-    ax.set_ylabel('Frequency')
-    ax.set_title('Option Hedge Type by IV Regime')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+        ax.set_xticks(x + 0.175)
+        ax.set_xticklabels(type_names, rotation=15, fontsize=8)
+        ax.set_ylabel('Frequency')
+        ax.set_title('Option Hedge Type by IV Regime')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    else:
+        x = np.arange(len(overlay_names))
+        for i, (mask, name, color) in enumerate([
+            (low_iv, 'Lower-vol regime', '#4CAF50'),
+            (high_iv, 'Higher-vol regime', '#F44336'),
+        ]):
+            if mask.sum() > 0:
+                counts = np.bincount(actions[mask], minlength=len(overlay_names))[:len(overlay_names)] / mask.sum()
+                ax.bar(x + i * 0.35, counts, 0.35, color=color,
+                       alpha=0.8, label=name, edgecolor='black')
+
+        ax.set_xticks(x + 0.175)
+        ax.set_xticklabels(overlay_names, fontsize=8)
+        ax.set_ylabel('Frequency')
+        ax.set_title('Overlay-Size Ladder by Volatility Regime')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
 
     # 6. Summary: where each component adds value
     ax = axes[1, 2]
@@ -460,8 +494,8 @@ def plot_rl_analysis(results):
         f"  Adaptive Weights: shift toward working alphas",
         f"  Rebalance Band: reduce turnover drag",
         f"  HMM: regime-aware allocation",
-        f"  RL Portfolio: dynamic risk budget",
-        f"  RL Hedging: option type + intensity selection",
+        f"  RL Portfolio: invested fraction + active overlay control",
+        f"  Hedge Sleeve: removed in current architecture",
     ]
 
     for i, line in enumerate(lines):
@@ -586,16 +620,8 @@ def plot_execution_demo():
     ax.set_xticks(range(len(names)))
     ax.set_xticklabels(names, fontsize=8)
     ax.set_ylabel('Total Execution Cost ($)')
-    ax.set_title('Total Cost Comparison')
+    ax.set_title('Illustrative Cost Comparison')
     ax.grid(True, alpha=0.3)
-
-    # Annotate savings
-    if costs[2] < costs[0]:
-        savings = (costs[0] - costs[2]) / costs[0] * 100
-        ax.annotate(f'RL saves {savings:.0f}% vs TWAP',
-                    xy=(2, costs[2]), xytext=(2.5, costs[0]),
-                    fontsize=9, fontweight='bold', color='#2196F3',
-                    arrowprops=dict(arrowstyle='->', color='#2196F3'))
 
     # 4. Training convergence
     ax = axes[1, 1]
@@ -608,7 +634,7 @@ def plot_execution_demo():
     ax.axhline(vwap_cost, color='#FF9800', linestyle='--', label='VWAP cost')
     ax.set_xlabel('Training Episode')
     ax.set_ylabel('Execution Cost')
-    ax.set_title('RL Learning Curve')
+    ax.set_title('Archived Execution-Submodule Training Trace')
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 

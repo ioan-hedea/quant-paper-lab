@@ -346,6 +346,8 @@ def _metric_summary(results: dict[str, object]) -> dict[str, float | str]:
 def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     beliefs = np.asarray(results.get('regime_beliefs', []), dtype=float)
     actions = np.asarray(results.get('actions', []), dtype=int)
+    invested_fractions = np.asarray(results.get('invested_fractions', []), dtype=float)
+    overlay_sizes = np.asarray(results.get('overlay_sizes', []), dtype=float)
     hedge_actions = np.asarray(results.get('hedge_actions', []), dtype=int)
     hedge_type_actions = np.asarray(results.get('hedge_type_actions', []), dtype=int)
     turnover = np.asarray(results.get('turnover', []), dtype=float)
@@ -364,6 +366,8 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     n_obs = min(
         len(beliefs),
         len(actions),
+        len(invested_fractions) if len(invested_fractions) > 0 else len(beliefs),
+        len(overlay_sizes) if len(overlay_sizes) > 0 else len(beliefs),
         len(hedge_actions),
         len(hedge_type_actions) if len(hedge_type_actions) > 0 else len(beliefs),
         len(turnover),
@@ -378,6 +382,8 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     )
     beliefs = beliefs[:n_obs]
     actions = actions[:n_obs]
+    invested_fractions = invested_fractions[:n_obs] if len(invested_fractions) > 0 else np.zeros(n_obs, dtype=float)
+    overlay_sizes = overlay_sizes[:n_obs] if len(overlay_sizes) > 0 else np.zeros(n_obs, dtype=float)
     hedge_actions = hedge_actions[:n_obs]
     hedge_type_actions = hedge_type_actions[:n_obs] if len(hedge_type_actions) > 0 else np.zeros(n_obs, dtype=int)
     turnover = turnover[:n_obs]
@@ -406,6 +412,8 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
             'label': results.get('experiment_label', 'unknown'),
             'regime': regime,
             'avg_action': float(actions[mask].mean()),
+            'avg_invested_fraction': float(invested_fractions[mask].mean()),
+            'avg_overlay_size': float(overlay_sizes[mask].mean()),
             'avg_hedge_action': float(hedge_actions[mask].mean()),
             'avg_hedge_type_action': float(hedge_type_actions[mask].mean()),
             'dominant_hedge_type': dominant_hedge_type,
@@ -456,96 +464,60 @@ def build_ablation_suite(base_config: PipelineConfig) -> list[PipelineConfig]:
     factor_only.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
     configs.append(factor_only)
 
-    factor_plus_pairs = copy.deepcopy(base_config)
-    factor_plus_pairs.experiment = ExperimentConfig(
-        label='factor_plus_pairs',
+    alpha_stack_fixed = copy.deepcopy(base_config)
+    alpha_stack_fixed.experiment = ExperimentConfig(
+        label='alpha_stack_fixed_weights',
         use_factor=True,
-        use_pairs=True,
+        use_pairs=False,
         use_lstm=False,
         adaptive_combiner=False,
         use_portfolio_rl=False,
         use_hedge_rl=False,
     )
-    factor_plus_pairs.optimizer.use_optimizer = False
-    factor_plus_pairs.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
-    configs.append(factor_plus_pairs)
-
-    factor_plus_lstm = copy.deepcopy(base_config)
-    factor_plus_lstm.experiment = ExperimentConfig(
-        label='factor_plus_lstm',
-        use_factor=True,
-        use_pairs=False,
-        use_lstm=True,
-        adaptive_combiner=False,
-        use_portfolio_rl=False,
-        use_hedge_rl=False,
-    )
-    factor_plus_lstm.optimizer.use_optimizer = False
-    factor_plus_lstm.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
-    configs.append(factor_plus_lstm)
+    configs.append(alpha_stack_fixed)
 
     alpha_stack = copy.deepcopy(base_config)
     alpha_stack.experiment = ExperimentConfig(
         label='alpha_stack_no_rl',
         use_factor=True,
-        use_pairs=True,
-        use_lstm=True,
+        use_pairs=False,
+        use_lstm=False,
         adaptive_combiner=True,
         use_portfolio_rl=False,
         use_hedge_rl=False,
     )
     configs.append(alpha_stack)
 
-    portfolio_only = copy.deepcopy(base_config)
-    portfolio_only.experiment = ExperimentConfig(
-        label='alpha_plus_portfolio_rl',
+    portfolio_fixed = copy.deepcopy(base_config)
+    portfolio_fixed.experiment = ExperimentConfig(
+        label='portfolio_rl_fixed_weights',
         use_factor=True,
-        use_pairs=True,
-        use_lstm=True,
-        adaptive_combiner=True,
+        use_pairs=False,
+        use_lstm=False,
+        adaptive_combiner=False,
         use_portfolio_rl=True,
         use_hedge_rl=False,
     )
-    portfolio_only.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
-    configs.append(portfolio_only)
-
-    hedge_only = copy.deepcopy(base_config)
-    hedge_only.experiment = ExperimentConfig(
-        label='alpha_plus_hedge_rl',
-        use_factor=True,
-        use_pairs=True,
-        use_lstm=True,
-        adaptive_combiner=True,
-        use_portfolio_rl=False,
-        use_hedge_rl=True,
-    )
-    configs.append(hedge_only)
+    portfolio_fixed.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
+    configs.append(portfolio_fixed)
 
     full_pipeline = copy.deepcopy(base_config)
     full_pipeline.experiment = ExperimentConfig(label='full_pipeline')
+    full_pipeline.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
     configs.append(full_pipeline)
 
-    # ---- State-feature ablations (RQ: which state info does RL actually use?) ----
-    no_uncertainty = copy.deepcopy(base_config)
-    no_uncertainty.experiment = ExperimentConfig(
-        label='full_no_uncertainty',
-        use_uncertainty_state=False,
+    full_fixed = copy.deepcopy(base_config)
+    full_fixed.experiment = ExperimentConfig(
+        label='full_pipeline_fixed_weights',
+        use_factor=True,
+        use_pairs=False,
+        use_lstm=False,
+        adaptive_combiner=False,
+        use_portfolio_rl=True,
+        use_hedge_rl=False,
     )
-    configs.append(no_uncertainty)
-
-    no_regime = copy.deepcopy(base_config)
-    no_regime.experiment = ExperimentConfig(
-        label='full_no_regime',
-        use_regime_state=False,
-    )
-    configs.append(no_regime)
-
-    no_vol = copy.deepcopy(base_config)
-    no_vol.experiment = ExperimentConfig(
-        label='full_no_vol',
-        use_vol_state=False,
-    )
-    configs.append(no_vol)
+    full_fixed.hedge_ratios = (0.0, 0.0, 0.0, 0.0)
+    configs.append(full_fixed)
 
     return configs
 
@@ -557,17 +529,13 @@ def _component_label(label: str) -> str:
 def _display_label(label: str) -> str:
     mapping = {
         'factor_only': 'Factor Only',
-        'factor_plus_pairs': 'Factor +\nPairs',
-        'factor_plus_lstm': 'Factor +\nLSTM',
+        'alpha_stack_fixed_weights': 'Allocator\nFixed Weights',
         'alpha_stack_no_rl': 'Alpha Stack\nNo RL',
-        'alpha_plus_portfolio_rl': 'Alpha +\nPortfolio RL',
-        'alpha_plus_hedge_rl': 'Alpha +\nHedge RL',
+        'portfolio_rl_fixed_weights': 'Portfolio RL\nFixed Weights',
         'full_pipeline': 'Full\nPipeline',
-        'full_no_uncertainty': 'Full\n(no uncert.)',
-        'full_no_regime': 'Full\n(no regime)',
-        'full_no_vol': 'Full\n(no vol)',
+        'full_pipeline_fixed_weights': 'Full Pipeline\nFixed Weights',
         'SPY': 'SPY',
-        'factor_benchmark': 'Factor Bench',
+        'factor_benchmark': 'Factor Benchmark',
         'vol_target': 'Vol-Target',
         'dd_delever': 'DD-Delever',
         'e2e_rl': 'E2E RL\n(PPO)',
@@ -607,7 +575,14 @@ def _build_ablation_summary(metrics: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
-    ordering = ['factor_only', 'factor_plus_pairs', 'factor_plus_lstm', 'alpha_stack_no_rl', 'alpha_plus_portfolio_rl', 'alpha_plus_hedge_rl', 'full_pipeline']
+    ordering = [
+        'factor_only',
+        'alpha_stack_fixed_weights',
+        'alpha_stack_no_rl',
+        'portfolio_rl_fixed_weights',
+        'full_pipeline_fixed_weights',
+        'full_pipeline',
+    ]
     summary['order'] = summary['component_label'].apply(lambda x: ordering.index(x) if x in ordering else len(ordering))
     summary = summary.sort_values('order').drop(columns='order')
     return summary
@@ -1006,7 +981,7 @@ def run_research_evaluation(
         ))
         + len(evaluation_config.cost_bps_grid)
         + len(evaluation_config.rebalance_band_grid)
-        + len(evaluation_config.hedge_scale_grid)
+        + (len(evaluation_config.hedge_scale_grid) if base_config.experiment.use_hedge_rl else 0)
         + len(evaluation_config.macro_lag_grid)
         + len(evaluation_config.reward_mode_grid)
     )
@@ -1265,23 +1240,24 @@ def run_research_evaluation(
         row.update({'suite': 'rebalance_sensitivity', 'window_id': 'full_sample', 'param_name': 'rebalance_band', 'param_value': rebalance_band})
         metric_rows.append(row)
 
-    for hedge_scale in evaluation_config.hedge_scale_grid:
-        hedge_config = copy.deepcopy(base_config)
-        hedge_config.hedge_ratios = tuple(round(h * hedge_scale, 4) for h in hedge_config.hedge_ratios)
-        hedge_config.experiment.label = 'full_pipeline'
-        results = _run_with_research_logging(
-            prices,
-            volumes,
-            returns,
-            macro_data,
-            hedge_config,
-            suite='hedge_sensitivity',
-            include_e2e=evaluation_config.research_e2e_scope == 'all',
-            run_key=f"hedge_sensitivity_{hedge_scale}",
-        )
-        row = _metric_summary(results)
-        row.update({'suite': 'hedge_sensitivity', 'window_id': 'full_sample', 'param_name': 'hedge_scale', 'param_value': hedge_scale})
-        metric_rows.append(row)
+    if base_config.experiment.use_hedge_rl:
+        for hedge_scale in evaluation_config.hedge_scale_grid:
+            hedge_config = copy.deepcopy(base_config)
+            hedge_config.hedge_ratios = tuple(round(h * hedge_scale, 4) for h in hedge_config.hedge_ratios)
+            hedge_config.experiment.label = 'full_pipeline'
+            results = _run_with_research_logging(
+                prices,
+                volumes,
+                returns,
+                macro_data,
+                hedge_config,
+                suite='hedge_sensitivity',
+                include_e2e=evaluation_config.research_e2e_scope == 'all',
+                run_key=f"hedge_sensitivity_{hedge_scale}",
+            )
+            row = _metric_summary(results)
+            row.update({'suite': 'hedge_sensitivity', 'window_id': 'full_sample', 'param_name': 'hedge_scale', 'param_value': hedge_scale})
+            metric_rows.append(row)
 
     for macro_lag in evaluation_config.macro_lag_grid:
         lag_config = copy.deepcopy(base_config)
@@ -1321,8 +1297,14 @@ def run_research_evaluation(
         row.update({'suite': 'reward_ablation', 'window_id': 'full_sample', 'param_name': 'reward_mode', 'param_value': reward_mode})
         metric_rows.append(row)
 
-        e2e_row = _path_metric_summary(results.get('e2e_rl', [1.0]), f'e2e_reward_{reward_mode}')
-        if 'ann_return' in e2e_row:
+        e2e_path = results.get('e2e_rl', [1.0])
+        e2e_row = _path_metric_summary(e2e_path, f'e2e_reward_{reward_mode}')
+        has_real_e2e = (
+            reward_config.enable_e2e_baseline
+            and len(e2e_path) > 1
+            and np.any(np.abs(np.asarray(e2e_path[1:], dtype=float) - 1.0) > 1e-12)
+        )
+        if has_real_e2e and 'ann_return' in e2e_row:
             e2e_row.update({'suite': 'reward_ablation', 'window_id': 'full_sample', 'param_name': 'reward_mode', 'param_value': f'e2e_{reward_mode}'})
             metric_rows.append(e2e_row)
 

@@ -1,0 +1,58 @@
+\begin{table}[H]
+\centering
+\caption{Ablation summary across train/test split settings.}
+\label{tab:ablation_summary}
+\begin{tabular}{@{} l r r r r r @{}}
+\toprule
+Component & Mean Return & Mean Vol. & Mean Sharpe & Mean Max DD & Mean Calmar \\
+\midrule
+Factor Only & 18.7\% & 18.3\% & 0.82 & $-26.9\%$ & 0.72 \\
+Factor + Pairs & 18.3\% & 18.3\% & 0.80 & $-27.1\%$ & 0.69 \\
+Factor + LSTM & 18.5\% & 18.3\% & 0.81 & $-27.1\%$ & 0.70 \\
+Alpha Stack No RL & 17.9\% & 17.5\% & 0.81 & $-24.8\%$ & 0.73 \\
+Alpha + Portfolio RL & 16.4\% & 16.1\% & 0.79 & $-21.7\%$ & 0.75 \\
+Alpha + Hedge RL & 12.4\% & 17.5\% & 0.49 & $-26.0\%$ & 0.47 \\
+Full Pipeline & 10.7\% & 16.3\% & 0.43 & $-22.3\%$ & 0.47 \\
+Full (no regime) & 11.5\% & 16.2\% & 0.47 & $-22.7\%$ & 0.50 \\
+Full (no uncert.) & 10.9\% & 16.2\% & 0.44 & $-23.1\%$ & 0.46 \\
+Full (no vol) & 11.3\% & 16.4\% & 0.46 & $-24.5\%$ & 0.45 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Rolling-window robustness summary for the full pipeline.}
+\label{tab:robustness_summary}
+\begin{tabular}{@{} l r @{}}
+\toprule
+Statistic & Value \\
+\midrule
+Rolling windows & 6 \\
+Median full-pipeline Sharpe & 0.51 \\
+Median full-pipeline Calmar & 0.83 \\
+Median full-pipeline Max DD & $-10.9\%$ \\
+Frac. windows full beats factor on drawdown & 50\% \\
+Frac. windows full beats factor on Calmar & 0\% \\
+Frac. windows full beats SPY on Sharpe & 33\% \\
+Frac. windows full beats SPY on Calmar & 17\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Block-bootstrap significance for full pipeline versus baselines (Sharpe deltas).}
+\label{tab:bootstrap_significance}
+\begin{tabular}{@{} l r r r @{}}
+\toprule
+Comparison & Delta Sharpe & 95\% CI & p-value \\
+\midrule
+Full - SPY & -0.05 & [-0.71, 0.45] & 0.830 \\
+Full - Factor Bench & -0.47 & [-0.86, -0.14] & 0.000 \\
+Full - Vol-Target & -0.36 & [-0.78, 0.04] & 0.075 \\
+Full - DD-Delever & -0.39 & [-0.83, 0.02] & 0.070 \\
+Full - E2E RL (PPO) & -0.03 & [-1.12, 0.91] & 0.950 \\
+\bottomrule
+\end{tabular}
+\end{table}
