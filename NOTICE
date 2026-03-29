@@ -1,0 +1,16 @@
+Licensing summary for this repository:
+
+- Source code in this repository is licensed under the MIT License.
+- Paper text, figures, and documentation created in this repository are
+  licensed under CC BY 4.0, unless a file states otherwise.
+
+Not covered by the repository license by default:
+
+- third-party data downloaded from external providers such as Yahoo Finance,
+  FRED, or the SEC
+- third-party libraries installed through the Python requirements files
+- externally sourced figures, tables, or content, if any
+
+Generated research artifacts may embed data derived from external providers.
+Before redistribution, verify that your intended use is compatible with the
+terms of the underlying data sources.

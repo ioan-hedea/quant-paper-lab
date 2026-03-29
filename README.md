@@ -273,6 +273,20 @@ The paper currently presents:
 - macro series: FRED when available, with fallbacks for core public macro inputs
 - SEC fundamentals: company-facts enrichment when `SEC_USER_AGENT` is provided
 
+## Licensing
+
+This repository now uses a simple split-license setup:
+
+- code: [LICENSE](LICENSE) (`MIT`)
+- paper text, documentation, and repo-authored figures: [LICENSE-docs](LICENSE-docs) (`CC BY 4.0`)
+- additional notes and exclusions: [NOTICE](NOTICE)
+
+Important:
+
+- external market, macro, and SEC data are not automatically relicensed by this repository
+- installed third-party packages keep their own licenses
+- generated artifacts may contain provider-derived data, so redistribution should still respect upstream data terms
+
 ## Important Caveats
 
 - This is research code, not production trading infrastructure.
