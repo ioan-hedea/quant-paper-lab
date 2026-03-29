@@ -220,6 +220,97 @@ class OptionOverlayConfig:
     collar_financing_ratio: float = 0.65
 
 
+# ============================================================
+# Control Method Registry
+# ============================================================
+# All control candidates from architecture revision v2.
+CONTROL_METHODS = (
+    'none',                  # No control — factor-only baseline
+    'fixed',                 # A1: Fixed allocator (constant invested fraction)
+    'vol_target',            # A2: Volatility targeting
+    'dd_delever',            # A3: Drawdown-based deleveraging
+    'regime_rules',          # A4: Regime-conditioned exposure rules
+    'ensemble_rules',        # A5: Simple ensemble of A2–A4
+    'linucb',                # B1: Contextual bandit — LinUCB
+    'thompson',              # B2: Contextual bandit — Thompson Sampling
+    'epsilon_greedy',        # B3: Contextual bandit — epsilon-greedy linear
+    'supervised',            # C:  Supervised regime-conditioned controller
+    'cvar_robust',           # D:  CVaR-aware robust optimization
+    'council',               # E:  Expert-gated council meta-controller
+    'cmdp_lagrangian',       # F:  Simple constrained-MDP controller
+    'q_learning',            # RL: Tabular Q-learning (portfolio only)
+    'ppo',                   # RL: End-to-end PPO
+)
+
+
+@dataclass
+class ControlConfig:
+    """Configuration for the pluggable control layer."""
+
+    method: str = 'none'
+    # A1: Fixed allocator
+    fixed_invested_fraction: float = 0.95
+    # A2: Vol-target
+    vol_target_annual: float = 0.15
+    vol_lookback: int = 63
+    # A3: DD-delever
+    dd_thresholds: tuple[tuple[float, float], ...] = ((-0.05, 1.0), (-0.08, 0.70), (-0.12, 0.40))
+    dd_min_invested: float = 0.30
+    # A4: Regime rules
+    regime_bull_threshold: float = 0.70
+    regime_bear_threshold: float = 0.30
+    regime_bull_fraction: float = 1.00
+    regime_neutral_fraction: float = 0.90
+    regime_bear_fraction: float = 0.75
+    # A5: Ensemble
+    ensemble_mode: str = 'mean'  # 'mean' or 'min'
+    # B: Bandit
+    bandit_n_actions: int = 5
+    bandit_reward_window: int = 5
+    bandit_alpha_ucb: float = 1.0
+    bandit_epsilon: float = 0.10
+    bandit_feature_lookback: int = 252
+    # C: Supervised controller
+    supervised_model: str = 'logistic'  # 'logistic', 'random_forest', 'decision_tree'
+    supervised_retrain_every: int = 63
+    supervised_label_window: int = 21
+    # D: CVaR-robust
+    cvar_confidence: float = 0.95
+    cvar_n_scenarios: int = 500
+    cvar_lambda_base: float = 1.0
+    cvar_regime_scaling: bool = True
+    cvar_dd_budget: bool = True
+    # E: Expert-gated council
+    council_experts: tuple[str, ...] = ('regime_rules', 'linucb', 'cvar_robust')
+    council_gate_model: str = 'logistic'
+    council_retrain_every: int = 63
+    council_min_samples: int = 40
+    council_temperature: float = 1.0
+    council_min_weight: float = 0.10
+    council_default_bias: tuple[float, ...] = (0.20, 0.20, 0.60)
+    # F: CMDP-style constrained controller
+    cmdp_constraint_type: str = 'drawdown'  # 'drawdown' or 'tail_loss'
+    cmdp_constraint_kappa: float = 0.12
+    cmdp_lambda_init: float = 1.0
+    cmdp_lambda_lr: float = 0.05
+    cmdp_tail_loss_threshold: float = 0.01
+    # Convexity-aware payoff shaping
+    convexity_enabled: bool = False
+    convexity_threshold: float = 0.0
+    convexity_mode_carries: tuple[float, float, float] = (0.0, 0.00015, 0.00040)
+    convexity_mode_lambdas: tuple[float, float, float] = (0.0, 1.50, 4.00)
+    convexity_mild_drawdown: float = -0.05
+    convexity_strong_drawdown: float = -0.10
+    convexity_mild_vol: float = 0.18
+    convexity_strong_vol: float = 0.26
+    convexity_mild_regime: float = 0.45
+    convexity_strong_regime: float = 0.30
+    # Q-learning (portfolio only)
+    ql_alpha: float = 0.03
+    ql_gamma: float = 0.95
+    ql_epsilon: float = 0.15
+
+
 @dataclass
 class ExperimentConfig:
     """Feature toggles used for ablation studies."""
@@ -235,6 +326,8 @@ class ExperimentConfig:
     use_uncertainty_state: bool = False
     use_regime_state: bool = False
     use_vol_state: bool = False
+    # Control method (new architecture v2)
+    control_method: str = 'none'
 
 
 @dataclass
@@ -256,6 +349,7 @@ class PipelineConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     option_overlay: OptionOverlayConfig = field(default_factory=OptionOverlayConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
 
 
 @dataclass

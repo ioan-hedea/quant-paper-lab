@@ -37,9 +37,11 @@ def main() -> None:
     print("  - research_rolling_references.csv")
     print("  - research_bootstrap_cis.csv")
     print("  - research_bootstrap_significance.csv")
+    print("  - research_control_significance.csv")
     print("  - research_summary.json")
     print("  - paper/2col/research_paper_tables.tex")
     print("  - pipeline_research_eval.png")
+    print("  - control_pareto_frontier.png")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,14 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
-from .config import EvaluationConfig, ExperimentConfig, PipelineConfig, RISK_FREE_RATE
+from .config import (
+    CONTROL_METHODS,
+    ControlConfig,
+    EvaluationConfig,
+    ExperimentConfig,
+    PipelineConfig,
+    RISK_FREE_RATE,
+)
 from .pipeline import run_full_pipeline
 from .plots import plot_rolling_windows, plot_reward_ablation
 
@@ -358,6 +365,16 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     tx_costs = np.asarray(results.get('transaction_costs', []), dtype=float)
     uncertainty = np.asarray(results.get('uncertainty_score', []), dtype=float)
     hedge_types = np.asarray(results.get('hedge_types', []), dtype=object)
+    convexity_modes = np.asarray(results.get('convexity_modes', []), dtype=int)
+    convexity_mode_names = np.asarray(results.get('convexity_mode_names', []), dtype=object)
+    convexity_carries = np.asarray(results.get('convexity_carries', []), dtype=float)
+    convexity_benefits = np.asarray(results.get('convexity_benefits', []), dtype=float)
+    council_weight_regime = np.asarray(results.get('council_weight_regime_rules', []), dtype=float)
+    council_weight_linucb = np.asarray(results.get('council_weight_linucb', []), dtype=float)
+    council_weight_cvar = np.asarray(results.get('council_weight_cvar_robust', []), dtype=float)
+    council_dominant = np.asarray(results.get('council_dominant_expert', []), dtype=object)
+    council_best = np.asarray(results.get('council_best_expert', []), dtype=object)
+    council_entropy = np.asarray(results.get('council_gate_entropy', []), dtype=float)
     wealth_rets = _daily_returns_from_path(results.get('wealth', []))
 
     if len(beliefs) == 0:
@@ -379,6 +396,16 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
         len(tx_costs),
         len(uncertainty),
         len(hedge_types) if len(hedge_types) > 0 else len(beliefs),
+        len(convexity_modes) if len(convexity_modes) > 0 else len(beliefs),
+        len(convexity_mode_names) if len(convexity_mode_names) > 0 else len(beliefs),
+        len(convexity_carries) if len(convexity_carries) > 0 else len(beliefs),
+        len(convexity_benefits) if len(convexity_benefits) > 0 else len(beliefs),
+        len(council_weight_regime) if len(council_weight_regime) > 0 else len(beliefs),
+        len(council_weight_linucb) if len(council_weight_linucb) > 0 else len(beliefs),
+        len(council_weight_cvar) if len(council_weight_cvar) > 0 else len(beliefs),
+        len(council_dominant) if len(council_dominant) > 0 else len(beliefs),
+        len(council_best) if len(council_best) > 0 else len(beliefs),
+        len(council_entropy) if len(council_entropy) > 0 else len(beliefs),
     )
     beliefs = beliefs[:n_obs]
     actions = actions[:n_obs]
@@ -394,6 +421,16 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     tx_costs = tx_costs[:n_obs]
     uncertainty = uncertainty[:n_obs]
     hedge_types = hedge_types[:n_obs] if len(hedge_types) > 0 else np.array(['none'] * n_obs, dtype=object)
+    convexity_modes = convexity_modes[:n_obs] if len(convexity_modes) > 0 else np.zeros(n_obs, dtype=int)
+    convexity_mode_names = convexity_mode_names[:n_obs] if len(convexity_mode_names) > 0 else np.array(['none'] * n_obs, dtype=object)
+    convexity_carries = convexity_carries[:n_obs] if len(convexity_carries) > 0 else np.zeros(n_obs, dtype=float)
+    convexity_benefits = convexity_benefits[:n_obs] if len(convexity_benefits) > 0 else np.zeros(n_obs, dtype=float)
+    council_weight_regime = council_weight_regime[:n_obs] if len(council_weight_regime) > 0 else np.zeros(n_obs, dtype=float)
+    council_weight_linucb = council_weight_linucb[:n_obs] if len(council_weight_linucb) > 0 else np.zeros(n_obs, dtype=float)
+    council_weight_cvar = council_weight_cvar[:n_obs] if len(council_weight_cvar) > 0 else np.zeros(n_obs, dtype=float)
+    council_dominant = council_dominant[:n_obs] if len(council_dominant) > 0 else np.array(['none'] * n_obs, dtype=object)
+    council_best = council_best[:n_obs] if len(council_best) > 0 else np.array(['none'] * n_obs, dtype=object)
+    council_entropy = council_entropy[:n_obs] if len(council_entropy) > 0 else np.zeros(n_obs, dtype=float)
     wealth_rets = wealth_rets[:n_obs]
 
     regime_masks = {
@@ -408,6 +445,9 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
             continue
         regime_hedge_types = hedge_types[mask]
         dominant_hedge_type = str(pd.Series(regime_hedge_types).mode().iloc[0]) if len(regime_hedge_types) > 0 else 'none'
+        dominant_convexity_mode = str(pd.Series(convexity_mode_names[mask]).mode().iloc[0]) if mask.sum() > 0 else 'none'
+        dominant_council_expert = str(pd.Series(council_dominant[mask]).mode().iloc[0]) if mask.sum() > 0 else 'none'
+        best_council_expert = str(pd.Series(council_best[mask]).mode().iloc[0]) if mask.sum() > 0 else 'none'
         rows.append({
             'label': results.get('experiment_label', 'unknown'),
             'regime': regime,
@@ -424,6 +464,16 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
             'avg_turnover': float(turnover[mask].mean()),
             'avg_transaction_cost': float(tx_costs[mask].mean()),
             'avg_uncertainty_score': float(uncertainty[mask].mean()),
+            'avg_convexity_mode': float(convexity_modes[mask].mean()),
+            'dominant_convexity_mode': dominant_convexity_mode,
+            'avg_convexity_carry': float(convexity_carries[mask].mean()),
+            'avg_convexity_benefit': float(convexity_benefits[mask].mean()),
+            'avg_council_weight_regime_rules': float(council_weight_regime[mask].mean()),
+            'avg_council_weight_linucb': float(council_weight_linucb[mask].mean()),
+            'avg_council_weight_cvar_robust': float(council_weight_cvar[mask].mean()),
+            'avg_council_gate_entropy': float(council_entropy[mask].mean()),
+            'dominant_council_expert': dominant_council_expert,
+            'best_council_expert': best_council_expert,
             'ann_return': float(wealth_rets[mask].mean() * 252),
             'ann_vol': float(wealth_rets[mask].std() * np.sqrt(252)),
         })
@@ -447,7 +497,215 @@ def _slice_inputs(
     )
 
 
+def build_control_comparison_suite(base_config: PipelineConfig) -> list[PipelineConfig]:
+    """Build configs for comparing all control candidates from architecture v2.
+
+    Each candidate shares the same alpha layer (factor + GARCH + HMM + adaptive combiner)
+    and constrained allocator. Only the control layer differs.
+    """
+    configs: list[PipelineConfig] = []
+
+    # Shared experiment settings for all control candidates
+    shared_experiment = ExperimentConfig(
+        use_factor=True,
+        use_pairs=False,
+        use_lstm=False,
+        adaptive_combiner=True,
+        use_portfolio_rl=False,
+        use_hedge_rl=False,
+    )
+
+    # 0. Factor-only (no control)
+    factor_only = copy.deepcopy(base_config)
+    factor_only.experiment = copy.deepcopy(shared_experiment)
+    factor_only.experiment.label = 'factor_only'
+    factor_only.control = ControlConfig(method='none')
+    factor_only.enable_e2e_baseline = False
+    configs.append(factor_only)
+
+    # A1: Fixed allocator (95% invested)
+    fixed = copy.deepcopy(base_config)
+    fixed.experiment = copy.deepcopy(shared_experiment)
+    fixed.experiment.label = 'A1_fixed'
+    fixed.experiment.control_method = 'fixed'
+    fixed.control = ControlConfig(method='fixed', fixed_invested_fraction=0.95)
+    fixed.enable_e2e_baseline = False
+    configs.append(fixed)
+
+    # A2: Vol-target
+    vol_target = copy.deepcopy(base_config)
+    vol_target.experiment = copy.deepcopy(shared_experiment)
+    vol_target.experiment.label = 'A2_vol_target'
+    vol_target.experiment.control_method = 'vol_target'
+    vol_target.control = ControlConfig(method='vol_target', vol_target_annual=0.12)
+    vol_target.enable_e2e_baseline = False
+    configs.append(vol_target)
+
+    # A3: DD-delever
+    dd_delever = copy.deepcopy(base_config)
+    dd_delever.experiment = copy.deepcopy(shared_experiment)
+    dd_delever.experiment.label = 'A3_dd_delever'
+    dd_delever.experiment.control_method = 'dd_delever'
+    dd_delever.control = ControlConfig(method='dd_delever')
+    dd_delever.enable_e2e_baseline = False
+    configs.append(dd_delever)
+
+    # A4: Regime rules
+    regime = copy.deepcopy(base_config)
+    regime.experiment = copy.deepcopy(shared_experiment)
+    regime.experiment.label = 'A4_regime_rules'
+    regime.experiment.control_method = 'regime_rules'
+    regime.control = ControlConfig(method='regime_rules')
+    regime.enable_e2e_baseline = False
+    configs.append(regime)
+
+    # A5: Ensemble (mean)
+    ensemble_mean = copy.deepcopy(base_config)
+    ensemble_mean.experiment = copy.deepcopy(shared_experiment)
+    ensemble_mean.experiment.label = 'A5_ensemble_mean'
+    ensemble_mean.experiment.control_method = 'ensemble_rules'
+    ensemble_mean.control = ControlConfig(method='ensemble_rules', ensemble_mode='mean')
+    ensemble_mean.enable_e2e_baseline = False
+    configs.append(ensemble_mean)
+
+    # A5b: Ensemble (min)
+    ensemble_min = copy.deepcopy(base_config)
+    ensemble_min.experiment = copy.deepcopy(shared_experiment)
+    ensemble_min.experiment.label = 'A5_ensemble_min'
+    ensemble_min.experiment.control_method = 'ensemble_rules'
+    ensemble_min.control = ControlConfig(method='ensemble_rules', ensemble_mode='min')
+    ensemble_min.enable_e2e_baseline = False
+    configs.append(ensemble_min)
+
+    # B1: LinUCB
+    linucb = copy.deepcopy(base_config)
+    linucb.experiment = copy.deepcopy(shared_experiment)
+    linucb.experiment.label = 'B1_linucb'
+    linucb.experiment.control_method = 'linucb'
+    linucb.control = ControlConfig(method='linucb')
+    linucb.enable_e2e_baseline = False
+    configs.append(linucb)
+
+    # B2: Thompson Sampling
+    thompson = copy.deepcopy(base_config)
+    thompson.experiment = copy.deepcopy(shared_experiment)
+    thompson.experiment.label = 'B2_thompson'
+    thompson.experiment.control_method = 'thompson'
+    thompson.control = ControlConfig(method='thompson')
+    thompson.enable_e2e_baseline = False
+    configs.append(thompson)
+
+    # B3: Epsilon-greedy
+    eps_greedy = copy.deepcopy(base_config)
+    eps_greedy.experiment = copy.deepcopy(shared_experiment)
+    eps_greedy.experiment.label = 'B3_epsilon_greedy'
+    eps_greedy.experiment.control_method = 'epsilon_greedy'
+    eps_greedy.control = ControlConfig(method='epsilon_greedy')
+    eps_greedy.enable_e2e_baseline = False
+    configs.append(eps_greedy)
+
+    # C: Supervised controller (logistic)
+    supervised = copy.deepcopy(base_config)
+    supervised.experiment = copy.deepcopy(shared_experiment)
+    supervised.experiment.label = 'C_supervised'
+    supervised.experiment.control_method = 'supervised'
+    supervised.control = ControlConfig(method='supervised', supervised_model='logistic')
+    supervised.enable_e2e_baseline = False
+    configs.append(supervised)
+
+    # D: CVaR-robust optimizer
+    cvar = copy.deepcopy(base_config)
+    cvar.experiment = copy.deepcopy(shared_experiment)
+    cvar.experiment.label = 'D_cvar_robust'
+    cvar.experiment.control_method = 'cvar_robust'
+    cvar.control = ControlConfig(method='cvar_robust')
+    cvar.enable_e2e_baseline = False
+    configs.append(cvar)
+
+    # D+: CVaR plus convexity-aware payoff shaping
+    cvar_convex = copy.deepcopy(base_config)
+    cvar_convex.experiment = copy.deepcopy(shared_experiment)
+    cvar_convex.experiment.label = 'D_plus_convexity'
+    cvar_convex.experiment.control_method = 'cvar_robust'
+    cvar_convex.control = ControlConfig(
+        method='cvar_robust',
+        convexity_enabled=True,
+    )
+    cvar_convex.enable_e2e_baseline = False
+    configs.append(cvar_convex)
+
+    # E: Expert-gated council
+    council = copy.deepcopy(base_config)
+    council.experiment = copy.deepcopy(shared_experiment)
+    council.experiment.label = 'E_council'
+    council.experiment.control_method = 'council'
+    council.control = ControlConfig(method='council')
+    council.enable_e2e_baseline = False
+    configs.append(council)
+
+    # E+: Expert-gated council plus convexity
+    council_convex = copy.deepcopy(base_config)
+    council_convex.experiment = copy.deepcopy(shared_experiment)
+    council_convex.experiment.label = 'E_plus_convexity'
+    council_convex.experiment.control_method = 'council'
+    council_convex.control = ControlConfig(
+        method='council',
+        convexity_enabled=True,
+    )
+    council_convex.enable_e2e_baseline = False
+    configs.append(council_convex)
+
+    # F: CMDP-style constrained controller
+    cmdp = copy.deepcopy(base_config)
+    cmdp.experiment = copy.deepcopy(shared_experiment)
+    cmdp.experiment.label = 'F_cmdp_lagrangian'
+    cmdp.experiment.control_method = 'cmdp_lagrangian'
+    cmdp.control = ControlConfig(method='cmdp_lagrangian')
+    cmdp.enable_e2e_baseline = False
+    configs.append(cmdp)
+
+    # RL: Tabular Q-learning (portfolio only, minimal state)
+    q_learning = copy.deepcopy(base_config)
+    q_learning.experiment = copy.deepcopy(shared_experiment)
+    q_learning.experiment.label = 'RL_q_learning'
+    q_learning.experiment.control_method = 'q_learning'
+    q_learning.control = ControlConfig(method='q_learning')
+    q_learning.enable_e2e_baseline = False
+    configs.append(q_learning)
+
+    return configs
+
+
+def _control_train_fracs(
+    ctrl_config: PipelineConfig,
+    evaluation_config: EvaluationConfig,
+) -> tuple[float, ...]:
+    """Allow controller-specific split overrides while keeping the grid size stable."""
+    adjusted: list[float] = []
+    for train_frac in evaluation_config.train_fracs:
+        candidate = float(train_frac)
+        if ctrl_config.control.method == 'q_learning' and abs(candidate - 0.50) < 1e-12:
+            candidate = 0.75
+        if not any(abs(candidate - existing) < 1e-12 for existing in adjusted):
+            adjusted.append(candidate)
+    return tuple(adjusted)
+
+
+def _control_reference_train_frac(
+    ctrl_config: PipelineConfig,
+    base_config: PipelineConfig,
+) -> float:
+    """Return the representative train split used for controller-to-controller comparisons."""
+    if ctrl_config.control.method == 'q_learning':
+        return 0.75
+    return float(base_config.train_frac)
+
+
 def build_ablation_suite(base_config: PipelineConfig) -> list[PipelineConfig]:
+    """Legacy ablation suite — retained for backwards compatibility.
+
+    For the revised architecture, use ``build_control_comparison_suite`` instead.
+    """
     configs: list[PipelineConfig] = []
 
     factor_only = copy.deepcopy(base_config)
@@ -526,9 +784,17 @@ def _component_label(label: str) -> str:
     return label.rsplit('_tf', 1)[0] if '_tf' in label else label
 
 
+def _control_component_label(label: str) -> str:
+    base = _component_label(label)
+    if base == 'factor_only':
+        return 'alpha_engine_no_control'
+    return base
+
+
 def _display_label(label: str) -> str:
     mapping = {
         'factor_only': 'Factor Only',
+        'alpha_engine_no_control': 'No Control\n(Alpha Engine)',
         'alpha_stack_fixed_weights': 'Allocator\nFixed Weights',
         'alpha_stack_no_rl': 'Alpha Stack\nNo RL',
         'portfolio_rl_fixed_weights': 'Portfolio RL\nFixed Weights',
@@ -540,6 +806,24 @@ def _display_label(label: str) -> str:
         'dd_delever': 'DD-Delever',
         'e2e_rl': 'E2E RL\n(PPO)',
         'risk_parity': 'Risk Parity',
+        # Control-method comparison labels (architecture v2)
+        'A1_fixed': 'A1: Fixed',
+        'A2_vol_target': 'A2: Vol-Target',
+        'A3_dd_delever': 'A3: DD-Delever',
+        'A4_regime_rules': 'A4: Regime Rules',
+        'A5_ensemble_mean': 'A5: Ensemble\n(mean)',
+        'A5_ensemble_min': 'A5: Ensemble\n(min)',
+        'B1_linucb': 'B1: LinUCB',
+        'B2_thompson': 'B2: Thompson',
+        'B3_epsilon_greedy': 'B3: Eps-Greedy',
+        'C_supervised': 'C: Supervised',
+        'D_cvar_robust': 'D: CVaR-Robust',
+        'D_plus_convexity': 'D+: CVaR + Convexity',
+        'E_council': 'E: Council',
+        'E_plus_convexity': 'E+: Council + Convexity',
+        'F_cmdp_lagrangian': 'F: CMDP-Lagrangian',
+        'RL_q_learning': 'RL: Q-Learning',
+        'RL_ppo': 'RL: PPO',
     }
     if label.startswith('full_pipeline_reward_'):
         reward_name = label.replace('full_pipeline_reward_', '').replace('_', ' ').title()
@@ -586,6 +870,119 @@ def _build_ablation_summary(metrics: pd.DataFrame) -> pd.DataFrame:
     summary['order'] = summary['component_label'].apply(lambda x: ordering.index(x) if x in ordering else len(ordering))
     summary = summary.sort_values('order').drop(columns='order')
     return summary
+
+
+def _build_control_comparison_summary(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Build the primary comparison table for architecture revision v2."""
+    control = metrics[metrics['suite'] == 'control_comparison'].copy()
+    if control.empty:
+        return pd.DataFrame()
+
+    control['component_label'] = control['label'].map(_control_component_label)
+    summary = (
+        control.groupby('component_label')
+        .agg(
+            mean_return=('ann_return', 'mean'),
+            mean_vol=('ann_vol', 'mean'),
+            mean_sharpe=('sharpe', 'mean'),
+            mean_max_drawdown=('max_drawdown', 'mean'),
+            mean_calmar=('calmar', 'mean'),
+        )
+        .reset_index()
+    )
+    ordering = [
+        'alpha_engine_no_control',
+        'A1_fixed',
+        'A2_vol_target',
+        'A3_dd_delever',
+        'A4_regime_rules',
+        'A5_ensemble_mean',
+        'A5_ensemble_min',
+        'B1_linucb',
+        'B2_thompson',
+        'B3_epsilon_greedy',
+        'C_supervised',
+        'D_cvar_robust',
+        'D_plus_convexity',
+        'E_council',
+        'E_plus_convexity',
+        'F_cmdp_lagrangian',
+        'RL_q_learning',
+        'RL_ppo',
+    ]
+    summary['order'] = summary['component_label'].apply(
+        lambda x: ordering.index(x) if x in ordering else len(ordering)
+    )
+    summary = summary.sort_values('order').drop(columns='order')
+    return summary
+
+
+def _decorate_control_significance(significance: pd.DataFrame) -> pd.DataFrame:
+    """Add component/display labels for controller-to-controller comparisons."""
+    if significance.empty:
+        return significance
+
+    decorated = significance.copy()
+    decorated['base_component_label'] = decorated['base_label'].map(_control_component_label)
+    decorated['compare_component_label'] = decorated['compare_label'].map(_control_component_label)
+    decorated['base_display_label'] = decorated['base_component_label'].map(_display_label)
+    decorated['compare_display_label'] = decorated['compare_component_label'].map(_display_label)
+    return decorated
+
+
+def _control_family(label: str) -> str:
+    if label in {'factor_only', 'alpha_engine_no_control'}:
+        return 'alpha baseline'
+    if label.startswith('A'):
+        return 'rules'
+    if label.startswith('B'):
+        return 'bandits'
+    if label.startswith('C'):
+        return 'supervised'
+    if label.startswith('D'):
+        return 'robust opt'
+    if label.startswith('E'):
+        return 'meta control'
+    if label.startswith('F'):
+        return 'safe rl'
+    if label.startswith('RL'):
+        return 'rl'
+    return 'other'
+
+
+def _control_color(label: str) -> str:
+    family_colors = {
+        'alpha baseline': '#7f7f7f',
+        'rules': '#4c78a8',
+        'bandits': '#f58518',
+        'supervised': '#54a24b',
+        'robust opt': '#e45756',
+        'meta control': '#72b7b2',
+        'safe rl': '#8c6d31',
+        'rl': '#b279a2',
+        'other': '#9d9da1',
+    }
+    return family_colors[_control_family(label)]
+
+
+def _pareto_frontier_points(summary: pd.DataFrame) -> pd.DataFrame:
+    """Return non-dominated points in return-vs-drawdown space.
+
+    Lower absolute drawdown is better; higher return is better.
+    """
+    if summary.empty:
+        return pd.DataFrame()
+    ranked = summary.copy()
+    ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
+    ranked = ranked.sort_values(['drawdown_abs', 'mean_return'], ascending=[True, False])
+    frontier_rows: list[dict[str, object]] = []
+    best_return = -np.inf
+    for _, row in ranked.iterrows():
+        ret = float(row['mean_return'])
+        if ret > best_return + 1e-12:
+            frontier_rows.append(row.to_dict())
+            best_return = ret
+    return pd.DataFrame(frontier_rows)
 
 
 def _build_robustness_summary(
@@ -720,9 +1117,16 @@ def plot_research_evaluation(
     baseline_results: dict[str, object] | None = None,
     rolling_references: pd.DataFrame | None = None,
 ) -> None:
-    """Create a compact workshop-style summary figure."""
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    fig.suptitle('Research Story: Main Result, Ablation, Robustness, and Control Behavior', fontsize=15, fontweight='bold')
+    """Create a paper-facing summary figure for the revised control-method study."""
+    fig, axes = plt.subplots(2, 3, figsize=(20, 11))
+    fig.suptitle(
+        'Research Story: Control Comparison, Legacy Ablation, and Robustness',
+        fontsize=15,
+        fontweight='bold',
+    )
+
+    control_summary = _build_control_comparison_summary(metrics)
+    ablation_summary = _build_ablation_summary(metrics)
 
     ax = axes[0, 0]
     if baseline_results is not None:
@@ -742,23 +1146,61 @@ def plot_research_evaluation(
                 ax.plot(dates, e2e_rl, color='#d62728', linewidth=1.3, linestyle='--', label='E2E RL (PPO)')
             ax.plot(dates, spy, color='black', linewidth=1.2, linestyle='--', label='SPY')
             ax.legend(fontsize=6, ncol=2)
-    ax.set_title('Main Result: Equity Curves')
+    ax.set_title('Legacy Full-Pipeline Reference Split')
     ax.grid(True, alpha=0.3)
 
     ax = axes[0, 1]
-    ablation_summary = _build_ablation_summary(metrics)
-    if not ablation_summary.empty:
-        ax.bar(
-            [_display_label(label) for label in ablation_summary['component_label']],
-            ablation_summary['mean_sharpe'],
-            color=['#bbbbbb', '#9ecae1', '#6baed6', '#3182bd', '#08519c'],
-            alpha=0.9,
-        )
-    ax.set_title('Ablation: Mean Sharpe by Component Stack')
-    ax.tick_params(axis='x', rotation=15)
+    if not control_summary.empty:
+        ranked = control_summary.sort_values('mean_sharpe', ascending=True)
+        labels = [_display_label(label).replace('\n', ' ') for label in ranked['component_label']]
+        colors = [_control_color(label) for label in ranked['component_label']]
+        ax.barh(labels, ranked['mean_sharpe'], color=colors, alpha=0.9)
+        for y, val in enumerate(ranked['mean_sharpe']):
+            ax.text(val + 0.01, y, f'{val:.2f}', va='center', fontsize=8)
+    ax.set_title('Control Comparison: Mean Sharpe')
+    ax.set_xlabel('Mean Sharpe')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[0, 2]
+    if not control_summary.empty:
+        for _, row in control_summary.iterrows():
+            label = str(row['component_label'])
+            x = float(row['mean_vol'])
+            y = float(row['mean_return'])
+            ax.scatter(
+                x,
+                y,
+                s=95,
+                color=_control_color(label),
+                edgecolors='black',
+                linewidth=0.6,
+                alpha=0.9,
+                zorder=4,
+            )
+            ax.annotate(
+                _display_label(label).replace('\n', ' '),
+                (x, y),
+                fontsize=7,
+                xytext=(5, 4),
+                textcoords='offset points',
+            )
+    ax.set_title('Control Comparison: Return vs Volatility')
+    ax.set_xlabel('Mean annualized volatility')
+    ax.set_ylabel('Mean annualized return')
     ax.grid(True, alpha=0.3)
 
     ax = axes[1, 0]
+    if not ablation_summary.empty:
+        labels = [_display_label(label).replace('\n', ' ') for label in ablation_summary['component_label']]
+        colors = ['#bbbbbb', '#9ecae1', '#6baed6', '#3182bd', '#08519c', '#08306b']
+        ax.barh(labels, ablation_summary['mean_sharpe'], color=colors[:len(labels)], alpha=0.9)
+        for y, val in enumerate(ablation_summary['mean_sharpe']):
+            ax.text(val + 0.01, y, f'{val:.2f}', va='center', fontsize=8)
+    ax.set_title('Legacy Ablation: Mean Sharpe by Stack')
+    ax.set_xlabel('Mean Sharpe')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1, 1]
     rolling = metrics[metrics['suite'] == 'rolling_window']
     if not rolling.empty:
         ax.plot(rolling['window_id'], rolling['sharpe'], marker='o', color='#1f77b4', linewidth=2, label='Full Pipeline')
@@ -778,31 +1220,290 @@ def plot_research_evaluation(
     ax.set_xlabel('Window')
     ax.grid(True, alpha=0.3)
 
-    ax = axes[1, 1]
-    if not regime_summary.empty:
-        pivot = (
-            regime_summary.pivot_table(
-                index='regime',
-                values=['avg_cash_weight', 'avg_hedge_ratio'],
-                aggfunc='mean',
+    ax = axes[1, 2]
+    if not control_summary.empty:
+        ranked = control_summary.copy()
+        ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
+        for _, row in ranked.iterrows():
+            label = str(row['component_label'])
+            x = float(row['drawdown_abs'])
+            y = float(row['mean_return'])
+            ax.scatter(
+                x,
+                y,
+                s=95,
+                color=_control_color(label),
+                edgecolors='black',
+                linewidth=0.6,
+                alpha=0.9,
+                zorder=4,
             )
-            .reindex(['bull', 'neutral', 'bear'])
-            .fillna(0.0)
-        )
-        invested = 1.0 - pivot['avg_cash_weight']
-        x = np.arange(len(pivot.index))
-        width = 0.35
-        ax.bar(x - width / 2, invested, width=width, color='#2ca02c', alpha=0.85, label='Avg invested fraction')
-        ax.bar(x + width / 2, pivot['avg_hedge_ratio'], width=width, color='#d62728', alpha=0.85, label='Avg hedge ratio')
-        ax.set_xticks(x)
-        ax.set_xticklabels(pivot.index)
-        ax.legend(fontsize=8)
-    ax.set_title('Behavior: Regime-Conditional Controller Response')
+            ax.annotate(
+                _display_label(label).replace('\n', ' '),
+                (x, y),
+                fontsize=7,
+                xytext=(5, 4),
+                textcoords='offset points',
+            )
+        frontier = _pareto_frontier_points(ranked)
+        if not frontier.empty and len(frontier) >= 2:
+            ax.plot(
+                frontier['drawdown_abs'],
+                frontier['mean_return'],
+                color='black',
+                linewidth=1.4,
+                linestyle='--',
+                alpha=0.8,
+                label='Pareto frontier',
+            )
+            ax.legend(fontsize=7, loc='lower right')
+    ax.set_title('Control Comparison: Return vs Drawdown')
+    ax.set_xlabel('Absolute mean max drawdown')
+    ax.set_ylabel('Mean annualized return')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig('pipeline_research_eval.png', dpi=150, bbox_inches='tight')
     plt.close(fig)
+
+    if not control_summary.empty:
+        frontier_fig, frontier_ax = plt.subplots(figsize=(8.5, 6.0))
+        ranked = control_summary.copy()
+        ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
+        for _, row in ranked.iterrows():
+            label = str(row['component_label'])
+            x = float(row['drawdown_abs'])
+            y = float(row['mean_return'])
+            frontier_ax.scatter(
+                x,
+                y,
+                s=110,
+                color=_control_color(label),
+                edgecolors='black',
+                linewidth=0.6,
+                alpha=0.9,
+            )
+            frontier_ax.annotate(
+                _display_label(label).replace('\n', ' '),
+                (x, y),
+                fontsize=8,
+                xytext=(5, 4),
+                textcoords='offset points',
+            )
+        frontier = _pareto_frontier_points(ranked)
+        if not frontier.empty:
+            frontier_ax.plot(
+                frontier['drawdown_abs'],
+                frontier['mean_return'],
+                color='black',
+                linewidth=1.5,
+                linestyle='--',
+            )
+        frontier_ax.set_title('Control-Method Pareto Frontier')
+        frontier_ax.set_xlabel('Absolute mean max drawdown')
+        frontier_ax.set_ylabel('Mean annualized return')
+        frontier_ax.grid(True, alpha=0.3)
+        frontier_fig.tight_layout()
+        frontier_fig.savefig('control_pareto_frontier.png', dpi=150, bbox_inches='tight')
+        plt.close(frontier_fig)
+
+
+def _normalize_checkpoint_value(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_checkpoint_value(item)
+            for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return tuple(_normalize_checkpoint_value(item) for item in value)
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, object]:
+    control_cfg = control_cfg or {}
+    method = str(control_cfg.get('method', 'none'))
+    canonical: dict[str, object] = {'method': method}
+
+    method_fields = {
+        'fixed': ('fixed_invested_fraction',),
+        'vol_target': ('vol_target_annual', 'vol_lookback'),
+        'dd_delever': ('dd_thresholds', 'dd_min_invested'),
+        'regime_rules': (
+            'regime_bull_threshold',
+            'regime_bear_threshold',
+            'regime_bull_fraction',
+            'regime_neutral_fraction',
+            'regime_bear_fraction',
+        ),
+        'ensemble_rules': (
+            'vol_target_annual',
+            'vol_lookback',
+            'dd_thresholds',
+            'dd_min_invested',
+            'regime_bull_threshold',
+            'regime_bear_threshold',
+            'regime_bull_fraction',
+            'regime_neutral_fraction',
+            'regime_bear_fraction',
+            'ensemble_mode',
+        ),
+        'linucb': (
+            'bandit_n_actions',
+            'bandit_reward_window',
+            'bandit_alpha_ucb',
+            'bandit_feature_lookback',
+        ),
+        'thompson': (
+            'bandit_n_actions',
+            'bandit_reward_window',
+            'bandit_feature_lookback',
+        ),
+        'epsilon_greedy': (
+            'bandit_n_actions',
+            'bandit_reward_window',
+            'bandit_epsilon',
+            'bandit_feature_lookback',
+        ),
+        'supervised': (
+            'bandit_n_actions',
+            'supervised_model',
+            'supervised_retrain_every',
+            'supervised_label_window',
+        ),
+        'cvar_robust': (
+            'cvar_confidence',
+            'cvar_n_scenarios',
+            'cvar_lambda_base',
+            'cvar_regime_scaling',
+            'cvar_dd_budget',
+        ),
+        'cmdp_lagrangian': (
+            'ql_alpha',
+            'ql_gamma',
+            'ql_epsilon',
+            'cmdp_constraint_type',
+            'cmdp_constraint_kappa',
+            'cmdp_lambda_init',
+            'cmdp_lambda_lr',
+            'cmdp_tail_loss_threshold',
+        ),
+        'council': (
+            'council_experts',
+            'council_gate_model',
+            'council_retrain_every',
+            'council_min_samples',
+            'council_temperature',
+            'council_min_weight',
+            'council_default_bias',
+            'bandit_n_actions',
+            'bandit_reward_window',
+            'bandit_alpha_ucb',
+            'bandit_feature_lookback',
+            'cvar_confidence',
+            'cvar_n_scenarios',
+            'cvar_lambda_base',
+            'cvar_regime_scaling',
+            'cvar_dd_budget',
+            'regime_bull_threshold',
+            'regime_bear_threshold',
+            'regime_bull_fraction',
+            'regime_neutral_fraction',
+            'regime_bear_fraction',
+        ),
+        'q_learning': ('ql_alpha', 'ql_gamma', 'ql_epsilon'),
+    }
+
+    for field in method_fields.get(method, ()):
+        if field in control_cfg:
+            canonical[field] = _normalize_checkpoint_value(control_cfg[field])
+
+    if bool(control_cfg.get('convexity_enabled', False)):
+        canonical['convexity_enabled'] = True
+        for field in (
+            'convexity_threshold',
+            'convexity_mode_carries',
+            'convexity_mode_lambdas',
+            'convexity_mild_drawdown',
+            'convexity_strong_drawdown',
+            'convexity_mild_vol',
+            'convexity_strong_vol',
+            'convexity_mild_regime',
+            'convexity_strong_regime',
+        ):
+            if field in control_cfg:
+                canonical[field] = _normalize_checkpoint_value(control_cfg[field])
+    return canonical
+
+
+def _canonical_pipeline_config(config_payload: dict[str, object]) -> dict[str, object]:
+    config_payload = config_payload or {}
+    experiment_cfg = dict(config_payload.get('experiment', {}) or {})
+    feature_cfg = dict(config_payload.get('feature_availability', {}) or {})
+    cost_cfg = dict(config_payload.get('cost_model', {}) or {})
+    optimizer_cfg = dict(config_payload.get('optimizer', {}) or {})
+    option_cfg = dict(config_payload.get('option_overlay', {}) or {})
+    control_cfg = dict(config_payload.get('control', {}) or {})
+
+    canonical = {
+        'train_frac': _normalize_checkpoint_value(config_payload.get('train_frac')),
+        'rebalance_band': _normalize_checkpoint_value(config_payload.get('rebalance_band')),
+        'min_turnover': _normalize_checkpoint_value(config_payload.get('min_turnover')),
+        'portfolio_reward_mode': _normalize_checkpoint_value(config_payload.get('portfolio_reward_mode')),
+        'hedge_reward_mode': _normalize_checkpoint_value(config_payload.get('hedge_reward_mode')),
+        'e2e_reward_mode': _normalize_checkpoint_value(config_payload.get('e2e_reward_mode')),
+        'enable_e2e_baseline': _normalize_checkpoint_value(config_payload.get('enable_e2e_baseline')),
+        'feature_availability': {
+            'macro_lag_days': _normalize_checkpoint_value(feature_cfg.get('macro_lag_days')),
+            'allow_static_sec_quality': _normalize_checkpoint_value(feature_cfg.get('allow_static_sec_quality')),
+        },
+        'cost_model': {
+            'base_cost_bps': _normalize_checkpoint_value(cost_cfg.get('base_cost_bps')),
+            'turnover_vol_multiplier': _normalize_checkpoint_value(cost_cfg.get('turnover_vol_multiplier')),
+            'size_penalty_bps': _normalize_checkpoint_value(cost_cfg.get('size_penalty_bps')),
+            'use_almgren_chriss': _normalize_checkpoint_value(cost_cfg.get('use_almgren_chriss')),
+            'ac_permanent_beta': _normalize_checkpoint_value(cost_cfg.get('ac_permanent_beta')),
+            'ac_temporary_eta': _normalize_checkpoint_value(cost_cfg.get('ac_temporary_eta')),
+        },
+        'optimizer': {
+            'use_optimizer': _normalize_checkpoint_value(optimizer_cfg.get('use_optimizer')),
+            'max_weight': _normalize_checkpoint_value(optimizer_cfg.get('max_weight')),
+            'risk_aversion': _normalize_checkpoint_value(optimizer_cfg.get('risk_aversion')),
+            'alpha_strength': _normalize_checkpoint_value(optimizer_cfg.get('alpha_strength')),
+            'anchor_strength': _normalize_checkpoint_value(optimizer_cfg.get('anchor_strength')),
+            'turnover_penalty': _normalize_checkpoint_value(optimizer_cfg.get('turnover_penalty')),
+            'group_caps': _normalize_checkpoint_value(optimizer_cfg.get('group_caps')),
+        },
+        'option_overlay': {
+            'use_option_overlay': _normalize_checkpoint_value(option_cfg.get('use_option_overlay')),
+        },
+        'experiment': {
+            'label': _normalize_checkpoint_value(experiment_cfg.get('label')),
+            'use_factor': _normalize_checkpoint_value(experiment_cfg.get('use_factor')),
+            'use_pairs': _normalize_checkpoint_value(experiment_cfg.get('use_pairs')),
+            'use_lstm': _normalize_checkpoint_value(experiment_cfg.get('use_lstm')),
+            'adaptive_combiner': _normalize_checkpoint_value(experiment_cfg.get('adaptive_combiner')),
+            'use_portfolio_rl': _normalize_checkpoint_value(experiment_cfg.get('use_portfolio_rl')),
+            'use_hedge_rl': _normalize_checkpoint_value(experiment_cfg.get('use_hedge_rl')),
+            'use_uncertainty_state': _normalize_checkpoint_value(experiment_cfg.get('use_uncertainty_state')),
+            'use_regime_state': _normalize_checkpoint_value(experiment_cfg.get('use_regime_state')),
+            'use_vol_state': _normalize_checkpoint_value(experiment_cfg.get('use_vol_state')),
+            'control_method': _normalize_checkpoint_value(experiment_cfg.get('control_method')),
+        },
+        'control': _canonical_control_config(control_cfg),
+    }
+    return canonical
+
+
+def _canonical_checkpoint_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    metadata = metadata or {}
+    canonical = dict(metadata)
+    canonical['config'] = _canonical_pipeline_config(dict(metadata.get('config', {}) or {}))
+    for key in ('prices', 'volumes', 'returns', 'macro', 'sec_quality'):
+        if key in canonical:
+            canonical[key] = _normalize_checkpoint_value(canonical[key])
+    return canonical
 
 
 def _checkpoint_path(checkpoint_dir: Path, run_key: str) -> Path:
@@ -847,7 +1548,7 @@ def _checkpoint_metadata(
     include_e2e: bool,
     run_key: str,
 ) -> dict[str, object]:
-    return {
+    return _canonical_checkpoint_metadata({
         'schema_version': CHECKPOINT_SCHEMA_VERSION,
         'run_key': run_key,
         'suite': suite,
@@ -858,7 +1559,7 @@ def _checkpoint_metadata(
         'returns': _frame_signature(run_returns),
         'macro': _frame_signature(run_macro),
         'sec_quality': _series_signature(sec_quality_scores),
-    }
+    })
 
 
 def _load_checkpoint_results(
@@ -880,7 +1581,8 @@ def _load_checkpoint_results(
         print(f"  Ignoring incompatible checkpoint at {checkpoint_path}; recomputing.")
         return None
 
-    if payload.get('metadata') != expected_metadata:
+    payload_metadata = _canonical_checkpoint_metadata(dict(payload.get('metadata', {}) or {}))
+    if payload_metadata != expected_metadata:
         print(f"  Ignoring mismatched checkpoint at {checkpoint_path}; recomputing.")
         return None
 
@@ -965,20 +1667,25 @@ def run_research_evaluation(
     baseline_results: dict[str, object] | None = None
     deferred_baseline_config: PipelineConfig | None = None
     first_ppo_logs_shown = False
+    ablation_suite = build_ablation_suite(base_config)
+    control_suite = build_control_comparison_suite(base_config)
+    rolling_starts = _rolling_starts(
+        n_obs=len(returns),
+        window_days=evaluation_config.rolling_window_days,
+        step_days=evaluation_config.rolling_step_days,
+        min_windows=evaluation_config.min_rolling_windows,
+        max_windows=evaluation_config.max_rolling_windows,
+    )
     total_runs = (
-        len(build_ablation_suite(base_config)) * len(evaluation_config.train_fracs)
+        len(ablation_suite) * len(evaluation_config.train_fracs)
+        + sum(len(_control_train_fracs(cfg, evaluation_config)) for cfg in control_suite)
         + (
             0
             if any(abs(train_frac - base_config.train_frac) < 1e-12 for train_frac in evaluation_config.train_fracs)
             else 1
         )
-        + len(_rolling_starts(
-            n_obs=len(returns),
-            window_days=evaluation_config.rolling_window_days,
-            step_days=evaluation_config.rolling_step_days,
-            min_windows=evaluation_config.min_rolling_windows,
-            max_windows=evaluation_config.max_rolling_windows,
-        ))
+        + 1  # strict timing
+        + len(rolling_starts)
         + len(evaluation_config.cost_bps_grid)
         + len(evaluation_config.rebalance_band_grid)
         + (len(evaluation_config.hedge_scale_grid) if base_config.experiment.use_hedge_rl else 0)
@@ -1112,7 +1819,7 @@ def run_research_evaluation(
             )
         return results
 
-    for config in build_ablation_suite(base_config):
+    for config in ablation_suite:
         base_label = config.experiment.label
         for train_frac in evaluation_config.train_fracs:
             run_config = copy.deepcopy(config)
@@ -1143,6 +1850,42 @@ def run_research_evaluation(
             if base_label == 'full_pipeline' and abs(train_frac - base_config.train_frac) < 1e-12:
                 baseline_results = results
 
+    # ================================================================
+    # CONTROL-METHOD COMPARISON (Architecture Revision v2)
+    # ================================================================
+    print("\n" + "=" * 60)
+    print("CONTROL-METHOD COMPARISON SUITE")
+    print("=" * 60)
+    control_baseline_results: dict[str, object] | None = None
+    control_results_by_label: dict[str, dict[str, object]] = {}
+    for ctrl_config in control_suite:
+        ctrl_label = ctrl_config.experiment.label
+        reference_train_frac = _control_reference_train_frac(ctrl_config, base_config)
+        for train_frac in _control_train_fracs(ctrl_config, evaluation_config):
+            run_config = copy.deepcopy(ctrl_config)
+            run_config.train_frac = train_frac
+            run_config.experiment.label = f'{ctrl_label}_tf{train_frac:.2f}'
+            results = _run_with_research_logging(
+                prices, volumes, returns, macro_data, run_config,
+                suite='control_comparison',
+                include_e2e=False,
+                run_key=f"control_{run_config.experiment.label}",
+            )
+            row = _metric_summary(results)
+            row.update({
+                'suite': 'control_comparison',
+                'window_id': 'full_sample',
+                'param_name': 'train_frac',
+                'param_value': train_frac,
+            })
+            metric_rows.append(row)
+            regime_rows.extend(_regime_summary(results))
+            # Use factor_only as the control baseline for bootstrap comparisons
+            if abs(train_frac - reference_train_frac) < 1e-12:
+                control_results_by_label[ctrl_label] = results
+                if ctrl_label == 'factor_only':
+                    control_baseline_results = results
+
     strict_timing = copy.deepcopy(base_config)
     strict_timing.feature_availability.macro_lag_days = max(evaluation_config.macro_lag_grid)
     strict_timing.feature_availability.allow_static_sec_quality = False
@@ -1162,14 +1905,7 @@ def run_research_evaluation(
     metric_rows.append(strict_row)
     regime_rows.extend(_regime_summary(strict_results))
 
-    starts = _rolling_starts(
-        n_obs=len(returns),
-        window_days=evaluation_config.rolling_window_days,
-        step_days=evaluation_config.rolling_step_days,
-        min_windows=evaluation_config.min_rolling_windows,
-        max_windows=evaluation_config.max_rolling_windows,
-    )
-    for window_id, start in enumerate(starts):
+    for window_id, start in enumerate(rolling_starts):
         end = start + evaluation_config.rolling_window_days
         if end > len(returns):
             continue
@@ -1342,9 +2078,11 @@ def run_research_evaluation(
     regime_summary = pd.DataFrame(regime_rows)
     rolling_references = pd.DataFrame(rolling_reference_rows)
     ablation_summary = _build_ablation_summary(metrics)
+    control_comparison_summary = _build_control_comparison_summary(metrics)
     robustness_summary = _build_robustness_summary(metrics, rolling_references)
     bootstrap_cis = pd.DataFrame()
     bootstrap_significance = pd.DataFrame()
+    control_significance = pd.DataFrame()
 
     if baseline_results is not None:
         bootstrap_paths = {
@@ -1369,6 +2107,35 @@ def run_research_evaluation(
             block_size=evaluation_config.bootstrap_block_size,
             seed=evaluation_config.bootstrap_seed,
         )
+
+    if control_results_by_label and 'D_cvar_robust' in control_results_by_label:
+        control_path_map = {
+            label: result.get('wealth', [1.0])
+            for label, result in control_results_by_label.items()
+        }
+        control_compare_labels = [
+            label for label in [
+                'factor_only',
+                'A4_regime_rules',
+                'B1_linucb',
+                'C_supervised',
+                'D_plus_convexity',
+                'E_council',
+                'E_plus_convexity',
+                'F_cmdp_lagrangian',
+                'RL_q_learning',
+            ]
+            if label in control_path_map
+        ]
+        control_significance = _compute_bootstrap_pairwise_significance(
+            path_map=control_path_map,
+            base_label='D_cvar_robust',
+            compare_labels=control_compare_labels,
+            n_samples=evaluation_config.bootstrap_samples,
+            block_size=evaluation_config.bootstrap_block_size,
+            seed=evaluation_config.bootstrap_seed + 101,
+        )
+        control_significance = _decorate_control_significance(control_significance)
 
     # Jobson-Korkie Sharpe ratio equality test
     jk_table = pd.DataFrame()
@@ -1411,11 +2178,19 @@ def run_research_evaluation(
     regime_summary.to_csv('research_regime_summary.csv', index=False)
     rolling_references.to_csv('research_rolling_references.csv', index=False)
     ablation_summary.to_csv('research_ablation_summary.csv', index=False)
+    if not control_comparison_summary.empty:
+        control_comparison_summary.to_csv('research_control_comparison.csv', index=False)
+        print("\n  Control Comparison Summary:")
+        for _, row in control_comparison_summary.iterrows():
+            print(f"    {row['component_label']:25s}  Sharpe={row['mean_sharpe']:.2f}  "
+                  f"Calmar={row['mean_calmar']:.2f}  MaxDD={row['mean_max_drawdown']:.1%}")
     robustness_summary.to_csv('research_robustness_summary.csv', index=False)
     if not bootstrap_cis.empty:
         bootstrap_cis.to_csv('research_bootstrap_cis.csv', index=False)
     if not bootstrap_significance.empty:
         bootstrap_significance.to_csv('research_bootstrap_significance.csv', index=False)
+    if not control_significance.empty:
+        control_significance.to_csv('research_control_significance.csv', index=False)
     _write_research_tables(ablation_summary, robustness_summary, bootstrap_significance=bootstrap_significance)
     plot_research_evaluation(metrics, regime_summary, baseline_results=baseline_results, rolling_references=rolling_references)
     plot_rolling_windows(metrics, rolling_references_df=rolling_references if not rolling_references.empty else None)
@@ -1427,9 +2202,11 @@ def run_research_evaluation(
         'n_metric_rows': len(metrics),
         'n_regime_rows': len(regime_summary),
         'ablation_summary': ablation_summary.to_dict(orient='records'),
+        'control_comparison_summary': control_comparison_summary.to_dict(orient='records') if not control_comparison_summary.empty else [],
         'robustness_summary': robustness_summary.to_dict(orient='records'),
         'bootstrap_cis': bootstrap_cis.to_dict(orient='records'),
         'bootstrap_significance': bootstrap_significance.to_dict(orient='records'),
+        'control_significance': control_significance.to_dict(orient='records'),
         'best_sharpe_by_suite': {
             suite: (
                 group.sort_values('sharpe', ascending=False)
@@ -1456,8 +2233,10 @@ def run_research_evaluation(
         'metrics': metrics,
         'regime_summary': regime_summary,
         'ablation_summary': ablation_summary,
+        'control_comparison_summary': control_comparison_summary,
         'robustness_summary': robustness_summary,
         'bootstrap_cis': bootstrap_cis,
         'bootstrap_significance': bootstrap_significance,
+        'control_significance': control_significance,
         'summary': summary,
     }

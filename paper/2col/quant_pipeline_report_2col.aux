@@ -2,16 +2,10 @@
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
-\citation{sutton2018,almgren2000}
-\citation{fama1993,jegadeesh1993}
-\citation{engle1987}
-\citation{engle1982,bollerslev1986}
-\citation{hamilton1989}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Research Questions}{1}{subsection.1.1}\protected@file@percent }
 \citation{fama1993}
 \citation{jegadeesh1993}
-\citation{engle1987}
 \citation{engle1982,bollerslev1986}
 \citation{hamilton1989}
 \citation{sutton2018,almgren2000}
@@ -19,12 +13,16 @@
 \citation{gu2020,kolm2019,jander2025}
 \citation{gu2020,chen2021,giglio2022}
 \citation{nevmyvaka2006,kolm2019hedge,buehler2019,du2020}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Related Literature and Design Motivation}{2}{section.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Recent Work on RL for Portfolio Management}{2}{subsection.2.1}\protected@file@percent }
 \citation{sun2023,jander2025}
 \citation{fama1993}
+\citation{almgren2000}
 \citation{moody2001,jiang2017,zhang2020,cong2021}
 \citation{gu2020,chen2021,giglio2022}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Literature and Design Motivation}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Recent Work on RL for Portfolio Management}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Taxonomy of portfolio-management architectures.}}{3}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:taxonomy}{{1}{3}{Taxonomy of portfolio-management architectures}{table.caption.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Contribution Type}{3}{subsection.2.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {3}System Architecture}{3}{section.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Software Structure}{3}{subsection.3.1}\protected@file@percent }
@@ -32,63 +30,62 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Universe}{3}{subsection.4.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Data Sources}{3}{subsection.4.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Macro Regime Inputs}{3}{subsection.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Uncertainty and Disagreement Features}{3}{subsection.4.4}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Taxonomy of portfolio-management architectures.}}{4}{table.caption.1}\protected@file@percent }
-\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{tab:taxonomy}{{1}{4}{Taxonomy of portfolio-management architectures}{table.caption.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces High-level architecture of the quantitative trading pipeline. The alpha and signal layer (top) produces expected-return scores and risk features; the control layer (bottom) translates these into portfolio weights, hedge intensity, and cash allocation before evaluation in the backtest engine.}}{4}{figure.caption.2}\protected@file@percent }
-\newlabel{fig:architecture}{{1}{4}{High-level architecture of the quantitative trading pipeline. The alpha and signal layer (top) produces expected-return scores and risk features; the control layer (bottom) translates these into portfolio weights, hedge intensity, and cash allocation before evaluation in the backtest engine}{figure.caption.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Information-Timing Contract}{4}{subsection.4.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Information-Timing Contract}{3}{subsection.4.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces High-level architecture of the revised quantitative trading pipeline. The alpha layer is intentionally finance-first, the allocator builds a capped and turnover-aware target book, and the control comparison focuses on how much of that book to express rather than on a second stock-selection problem. The compared control families span simple rules, contextual bandits, supervised control, robust optimization, and RL.}}{4}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:architecture}{{1}{4}{High-level architecture of the revised quantitative trading pipeline. The alpha layer is intentionally finance-first, the allocator builds a capped and turnover-aware target book, and the control comparison focuses on how much of that book to express rather than on a second stock-selection problem. The compared control families span simple rules, contextual bandits, supervised control, robust optimization, and RL}{figure.caption.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Module-level decomposition of the \texttt  {quant\_stack} package.}}{4}{table.caption.3}\protected@file@percent }
+\newlabel{tab:modules}{{2}{4}{Module-level decomposition of the \texttt {quant\_stack} package}{table.caption.3}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Methodology}{4}{section.5}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Problem Formulation}{4}{subsection.5.1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Module-level decomposition of the \texttt  {quant\_stack} package.}}{5}{table.caption.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Cross-Sectional Factor Model}{5}{subsection.5.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Pairs Trading}{5}{subsection.5.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Volatility and Regime Models}{5}{subsection.5.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Adaptive Alpha Combination}{5}{subsection.5.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Portfolio Construction RL}{5}{subsection.5.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.7}Reward Design}{6}{subsection.5.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.8}No-Trade Band and Hedging}{6}{subsection.5.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.9}Transaction Costs and Execution Realism}{6}{subsection.5.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Design}{7}{section.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Benchmark Logic}{7}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Cross-Sectional Factor Model}{4}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Volatility and Regime Models}{5}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Adaptive Alpha Combination}{5}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Constrained Allocator}{5}{subsection.5.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Control Methods}{5}{subsection.5.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.7}Portfolio RL}{5}{subsection.5.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.8}Reward Design}{6}{subsection.5.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.9}No-Trade Band and Transaction Costs}{6}{subsection.5.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Experimental Design}{6}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Benchmark Logic}{6}{subsection.6.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {7}Evaluation Metrics}{7}{section.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {8}Results}{8}{section.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Main Result}{8}{subsection.8.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Ablation Result}{8}{subsection.8.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Performance summary on the walk-forward test window (25 Sep 2019 -- 27 Mar 2026). Annualized figures. Max DD denotes maximum peak-to-trough drawdown; Calmar is annualized return divided by $|\text  {Max DD}|$.}}{9}{table.caption.4}\protected@file@percent }
-\newlabel{tab:metrics}{{3}{9}{Performance summary on the walk-forward test window (25 Sep 2019 -- 27 Mar 2026). Annualized figures. Max DD denotes maximum peak-to-trough drawdown; Calmar is annualized return divided by $|\text {Max DD}|$}{table.caption.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Ablation summary across train/test split settings.}}{9}{table.caption.6}\protected@file@percent }
-\newlabel{tab:ablation_summary}{{4}{9}{Ablation summary across train/test split settings}{table.caption.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Rule-Based and End-to-End Baseline Evidence}{9}{subsection.8.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Reward-Function Sensitivity}{9}{subsection.8.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Compact workshop-style summary figure generated by the robustness engine. The four panels show the main equity-curve result, ablation evidence, rolling-window robustness, and regime-conditioned controller behavior. The figure makes clear that the strongest raw-performance outcomes in the archived bundle come from the factor-only benchmark and the strongest simple overlays, and that the RL-based variants remain well below those comparators on top-line metrics.}}{10}{figure.caption.5}\protected@file@percent }
-\newlabel{fig:research}{{2}{10}{Compact workshop-style summary figure generated by the robustness engine. The four panels show the main equity-curve result, ablation evidence, rolling-window robustness, and regime-conditioned controller behavior. The figure makes clear that the strongest raw-performance outcomes in the archived bundle come from the factor-only benchmark and the strongest simple overlays, and that the RL-based variants remain well below those comparators on top-line metrics}{figure.caption.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.5}Robustness Across Windows}{10}{subsection.8.5}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Rolling-window robustness summary for the full pipeline.}}{11}{table.caption.7}\protected@file@percent }
-\newlabel{tab:robustness_summary}{{5}{11}{Rolling-window robustness summary for the full pipeline}{table.caption.7}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Block-bootstrap significance for full pipeline versus baselines (Sharpe deltas).}}{11}{table.caption.8}\protected@file@percent }
-\newlabel{tab:bootstrap_significance}{{6}{11}{Block-bootstrap significance for full pipeline versus baselines (Sharpe deltas)}{table.caption.8}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Reward-function ablation for the full pipeline on the archived bundle.}}{11}{table.caption.9}\protected@file@percent }
-\newlabel{tab:reward_ablation}{{7}{11}{Reward-function ablation for the full pipeline on the archived bundle}{table.caption.9}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {8.6}Behavioral and Regime Evidence}{11}{subsection.8.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {9}Discussion}{11}{section.9}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Rolling-window robustness from the archived March 28, 2026 experiment bundle. The full pipeline shows mixed performance across windows, beating SPY on Sharpe in only one-third of slices and never exceeding the factor-only benchmark on Calmar. These rolling windows are internal robustness slices from one archived historical sample rather than independent replications.}}{12}{figure.caption.10}\protected@file@percent }
-\newlabel{fig:rollingwindows}{{3}{12}{Rolling-window robustness from the archived March 28, 2026 experiment bundle. The full pipeline shows mixed performance across windows, beating SPY on Sharpe in only one-third of slices and never exceeding the factor-only benchmark on Calmar. These rolling windows are internal robustness slices from one archived historical sample rather than independent replications}{figure.caption.10}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}When Practitioners Should Use This Architecture}{12}{subsection.9.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {10}Threats to Validity and Future Work}{13}{section.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {11}Conclusion}{13}{section.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {A}Implementation Snapshot}{13}{appendix.A}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Archived Experiment Control Ladders}{13}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Results}{7}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Main Result: Control Comparison}{7}{subsection.8.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Control-comparison summary across train/test split settings. All methods share the same finance-first alpha engine and constrained allocator. Annualized figures.}}{8}{table.caption.4}\protected@file@percent }
+\newlabel{tab:metrics}{{3}{8}{Control-comparison summary across train/test split settings. All methods share the same finance-first alpha engine and constrained allocator. Annualized figures}{table.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Legacy Ablation and Complexity Pruning}{8}{subsection.8.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Legacy Full-Pipeline Reference and Significance}{8}{subsection.8.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Reward Sensitivity and Robustness of the Legacy Branch}{8}{subsection.8.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Overview of the finished control-comparison bundle. The panels show the full ranking by mean Sharpe, return-versus-drawdown trade-offs, the best representative in each controller family, and split-to-split Sharpe stability for selected methods. The main visual message is that CVaR-aware robust optimization is the strongest point-estimate controller in the new study, while simple rules remain competitive and RL is not the leading method.}}{9}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:control_overview}{{2}{9}{Overview of the finished control-comparison bundle. The panels show the full ranking by mean Sharpe, return-versus-drawdown trade-offs, the best representative in each controller family, and split-to-split Sharpe stability for selected methods. The main visual message is that CVaR-aware robust optimization is the strongest point-estimate controller in the new study, while simple rules remain competitive and RL is not the leading method}{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Discussion}{9}{section.9}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Split-by-split stability across the 13 control methods. The left panel shows Sharpe by train fraction; the right panel shows absolute maximum drawdown. The figure highlights both the breadth of the CVaR-robust point-estimate lead and the fact that it does not dominate every downside metric, especially realized maximum drawdown.}}{10}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:control_heatmaps}{{3}{10}{Split-by-split stability across the 13 control methods. The left panel shows Sharpe by train fraction; the right panel shows absolute maximum drawdown. The figure highlights both the breadth of the CVaR-robust point-estimate lead and the fact that it does not dominate every downside metric, especially realized maximum drawdown}{figure.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}When Practitioners Should Use Which Control Style}{10}{subsection.9.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Legacy ablation summary across train/test split settings. The factor-only row belongs to the archived pruning suite used to diagnose the old RL-heavy stack and is not directly comparable to the control-comparison factor-only baseline in Table~\ref {tab:metrics}.}}{11}{table.caption.7}\protected@file@percent }
+\newlabel{tab:ablation_summary}{{4}{11}{Legacy ablation summary across train/test split settings. The factor-only row belongs to the archived pruning suite used to diagnose the old RL-heavy stack and is not directly comparable to the control-comparison factor-only baseline in Table~\ref {tab:metrics}}{table.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Legacy pruning story from the retained ablation suite. The left panel orders the old architecture variants by mean Sharpe; the right panel shows the pruning path in return-versus-drawdown space. Its role in the revised paper is diagnostic: it explains why the study moved away from defending the old RL stack and toward a broader control-method comparison.}}{11}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:legacy_pruning}{{4}{11}{Legacy pruning story from the retained ablation suite. The left panel orders the old architecture variants by mean Sharpe; the right panel shows the pruning path in return-versus-drawdown space. Its role in the revised paper is diagnostic: it explains why the study moved away from defending the old RL stack and toward a broader control-method comparison}{figure.caption.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Rolling-window robustness summary for the full pipeline.}}{11}{table.caption.9}\protected@file@percent }
+\newlabel{tab:robustness_summary}{{5}{11}{Rolling-window robustness summary for the full pipeline}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Threats to Validity and Future Work}{11}{section.10}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Block-bootstrap significance for the legacy full pipeline versus selected baselines (Sharpe deltas).}}{12}{table.caption.10}\protected@file@percent }
+\newlabel{tab:legacy_bootstrap_significance}{{6}{12}{Block-bootstrap significance for the legacy full pipeline versus selected baselines (Sharpe deltas)}{table.caption.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Rolling-window robustness for the retained legacy full pipeline. The pattern remains mixed: drawdown improves more often than Sharpe, and the windows should be interpreted as internal robustness slices from one historical sample rather than independent replications.}}{12}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:rollingwindows}{{5}{12}{Rolling-window robustness for the retained legacy full pipeline. The pattern remains mixed: drawdown improves more often than Sharpe, and the windows should be interpreted as internal robustness slices from one historical sample rather than independent replications}{figure.caption.12}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Reward-function ablation for the full pipeline on the revised bundle.}}{12}{table.caption.11}\protected@file@percent }
+\newlabel{tab:reward_ablation}{{7}{12}{Reward-function ablation for the full pipeline on the revised bundle}{table.caption.11}{}}
 \bibcite{almgren2000}{{1}{}{{}}{{}}}
 \bibcite{buehler2019}{{2}{}{{}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {11}Conclusion}{13}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Implementation Snapshot}{13}{appendix.A}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Revised-Study Snapshot}{13}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Research Artifacts}{13}{subsection.A.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Supplementary Diagnostic Figures}{13}{subsection.A.3}\protected@file@percent }
 \bibcite{bollerslev1986}{{3}{}{{}}{{}}}
 \bibcite{chen2021}{{4}{}{{}}{{}}}
 \bibcite{cong2021}{{5}{}{{}}{{}}}
 \bibcite{deng2017}{{6}{}{{}}{{}}}
 \bibcite{du2020}{{7}{}{{}}{{}}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Research Artifacts}{14}{subsection.A.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Supplementary Diagnostic Figures}{14}{subsection.A.3}\protected@file@percent }
 \bibcite{engle1982}{{8}{}{{}}{{}}}
 \bibcite{engle1987}{{9}{}{{}}{{}}}
 \bibcite{fama1993}{{10}{}{{}}{{}}}
@@ -97,6 +94,10 @@
 \bibcite{hamilton1989}{{13}{}{{}}{{}}}
 \bibcite{jander2025}{{14}{}{{}}{{}}}
 \bibcite{jegadeesh1993}{{15}{}{{}}{{}}}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Active study design in the revised frozen bundle.}}{14}{table.caption.13}\protected@file@percent }
+\newlabel{tab:archsnapshot}{{8}{14}{Active study design in the revised frozen bundle}{table.caption.13}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Supplementary reward-ablation figure for the revised bundle. Reward choice changes the controller's operating point modestly, but the broader ranking versus the factor-only benchmark and the strongest rule-based overlays is unchanged.}}{14}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:rewardfig}{{6}{14}{Supplementary reward-ablation figure for the revised bundle. Reward choice changes the controller's operating point modestly, but the broader ranking versus the factor-only benchmark and the strongest rule-based overlays is unchanged}{figure.caption.14}{}}
 \bibcite{jiang2017}{{16}{}{{}}{{}}}
 \bibcite{kolm2019}{{17}{}{{}}{{}}}
 \bibcite{kolm2019hedge}{{18}{}{{}}{{}}}
@@ -107,6 +108,4 @@
 \bibcite{sutton2018}{{23}{}{{}}{{}}}
 \bibcite{zhang2020}{{24}{}{{}}{{}}}
 \providecommand\NAT@force@numbers{}\NAT@force@numbers
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Supplementary reward-ablation figure for the archived bundle. Reward choice moves the full pipeline within a relatively narrow performance band, and no reward variant changes the broader ranking in which the factor-only benchmark and the strongest rule-based overlays remain stronger on return- and Sharpe- based metrics.}}{15}{figure.caption.11}\protected@file@percent }
-\newlabel{fig:rewardfig}{{4}{15}{Supplementary reward-ablation figure for the archived bundle. Reward choice moves the full pipeline within a relatively narrow performance band, and no reward variant changes the broader ranking in which the factor-only benchmark and the strongest rule-based overlays remain stronger on return- and Sharpe- based metrics}{figure.caption.11}{}}
 \gdef \@abspage@last{15}

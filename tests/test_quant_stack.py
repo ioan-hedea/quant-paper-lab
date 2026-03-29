@@ -17,9 +17,10 @@ from quant_stack.data import (
     _sanitize_ohlcv_download,
     compute_macro_regime_signal,
 )
-from quant_stack.evaluation import build_ablation_suite, run_research_evaluation
+from quant_stack.evaluation import build_ablation_suite, build_control_comparison_suite, run_research_evaluation
 from quant_stack.pipeline import _apply_macro_lag, _compute_transaction_cost
-from quant_stack.config import EvaluationConfig, PipelineConfig
+from quant_stack.config import ControlConfig, EvaluationConfig, PipelineConfig
+from quant_stack.controllers import build_controller, ControlState
 from quant_stack.rl import PortfolioConstructionRL
 
 
@@ -163,13 +164,44 @@ class EvaluationTests(unittest.TestCase):
             labels,
             [
                 "factor_only",
+                "alpha_stack_fixed_weights",
                 "alpha_stack_no_rl",
-                "alpha_plus_portfolio_rl",
-                "alpha_plus_hedge_rl",
+                "portfolio_rl_fixed_weights",
                 "full_pipeline",
+                "full_pipeline_fixed_weights",
             ],
         )
         self.assertEqual(len(labels), len(set(labels)))
+
+    def test_control_comparison_suite_covers_all_candidates(self) -> None:
+        configs = build_control_comparison_suite(PipelineConfig())
+        labels = [config.experiment.label for config in configs]
+
+        expected_prefixes = [
+            'factor_only', 'A1_', 'A2_', 'A3_', 'A4_', 'A5_', 'A5_',
+            'B1_', 'B2_', 'B3_', 'C_', 'D_', 'RL_',
+        ]
+        self.assertEqual(len(configs), len(expected_prefixes))
+        self.assertEqual(len(labels), len(set(labels)))
+
+    def test_controllers_return_valid_invested_fraction(self) -> None:
+        state = ControlState(
+            alpha_strength=0.5,
+            recent_drawdown=-0.03,
+            recent_vol=0.15,
+            regime_belief=0.6,
+            trend=0.05,
+            concentration=0.15,
+            invested_fraction=0.95,
+            t=500,
+        )
+        for method in ['fixed', 'vol_target', 'dd_delever', 'regime_rules',
+                       'ensemble_rules', 'linucb', 'thompson', 'epsilon_greedy',
+                       'q_learning']:
+            ctrl = build_controller(ControlConfig(method=method))
+            frac = ctrl.compute_invested_fraction(state)
+            self.assertGreaterEqual(frac, 0.0, msg=f"{method} returned negative fraction")
+            self.assertLessEqual(frac, 1.5, msg=f"{method} returned unreasonable fraction")
 
     def test_research_defers_single_e2e_baseline_to_end(self) -> None:
         index = pd.date_range("2025-01-01", periods=10, freq="B")
