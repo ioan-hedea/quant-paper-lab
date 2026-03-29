@@ -28,7 +28,7 @@ In the current archived story, no single method dominates every metric:
 
 ## Current Architecture
 
-The active research stack is defined in [architecture_revision_v2.md](/quant-paper-lab%20/architecture_revision_v2.md).
+The active research stack is defined in [architecture_revision_v2.md](architecture_revision_v2.md).
 
 ### 1. Alpha Layer
 
@@ -254,13 +254,13 @@ Paper-support artifact:
 
 Main manuscript sources:
 
-- [paper/1col/quant_pipeline_report.tex](/quant-paper-lab%20/paper/1col/quant_pipeline_report.tex)
+- [paper/1col/quant_pipeline_report.tex](paper/1col/quant_pipeline_report.tex)
 - [paper/2col/quant_pipeline_report_2col.tex](paper/2col/quant_pipeline_report_2col.tex)
 
 Built PDFs:
 
-- [paper/1col/quant_pipeline_report.pdf](/quant-paper-lab%20/paper/1col/quant_pipeline_report.pdf)
-- [paper/2col/quant_pipeline_report_2col.pdf](/quant-paper-lab%20/paper/2col/quant_pipeline_report_2col.pdf)
+- [paper/1col/quant_pipeline_report.pdf](paper/1col/quant_pipeline_report.pdf)
+- [paper/2col/quant_pipeline_report_2col.pdf](paper/2col/quant_pipeline_report_2col.pdf)
 
 The paper currently presents:
 
@@ -290,4 +290,4 @@ For everyday work, the simplest sequence is:
 4. Update the paper sources in `paper/1col/` and `paper/2col/`.
 5. Rebuild the PDFs.
 
-If the study direction changes, update [architecture_revision_v2.md](/quant-paper-lab%20/architecture_revision_v2.md) first, then align code, artifacts, and manuscript text to that decision.
+If the study direction changes, update [architecture_revision_v2.md](architecture_revision_v2.md) first, then align code, artifacts, and manuscript text to that decision.
