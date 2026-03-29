@@ -5,6 +5,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 from .config import RISK_FREE_RATE
 from .rl import ExecutionRL
@@ -646,6 +647,7 @@ def plot_execution_demo():
 def plot_rolling_windows(
     metrics_df: pd.DataFrame,
     rolling_references_df: pd.DataFrame | None = None,
+    output_path: str | Path = 'pipeline_rolling_windows.png',
 ) -> None:
     """Figure 4: Rolling-window robustness — Sharpe and Calmar distributions across windows."""
     rolling = metrics_df[metrics_df['suite'] == 'rolling_window'].copy()
@@ -717,13 +719,18 @@ def plot_rolling_windows(
         ax.tick_params(axis='x', rotation=15)
         ax.grid(True, alpha=0.3, axis='y')
 
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig('pipeline_rolling_windows.png', dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print("Saved: pipeline_rolling_windows.png")
+    print(f"Saved: {output_path}")
 
 
-def plot_reward_ablation(metrics_df: pd.DataFrame) -> None:
+def plot_reward_ablation(
+    metrics_df: pd.DataFrame,
+    output_path: str | Path = 'pipeline_reward_ablation.png',
+) -> None:
     """Figure 6: Reward function ablation — pipeline performance across 4 reward modes."""
     reward_data = metrics_df[
         (metrics_df['suite'] == 'reward_ablation') &
@@ -812,7 +819,9 @@ def plot_reward_ablation(metrics_df: pd.DataFrame) -> None:
         if ax is axes[0]:
             ax.legend(fontsize=7)
 
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig('pipeline_reward_ablation.png', dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print("Saved: pipeline_reward_ablation.png")
+    print(f"Saved: {output_path}")

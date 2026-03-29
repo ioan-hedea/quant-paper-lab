@@ -1034,6 +1034,7 @@ def _build_robustness_summary(
 def _write_research_tables(
     ablation_summary: pd.DataFrame,
     robustness_summary: pd.DataFrame,
+    output_path: Path,
     bootstrap_significance: pd.DataFrame | None = None,
 ) -> None:
     lines: list[str] = []
@@ -1107,7 +1108,8 @@ def _write_research_tables(
             lines.append(f"{comp} & {delta:.2f} & [{low:.2f}, {high:.2f}] & {pval:.3f} \\\\")
         lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
 
-    with open('paper/2col/research_paper_tables.tex', 'w', encoding='utf-8') as handle:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open('w', encoding='utf-8') as handle:
         handle.write("\n".join(lines) + ("\n" if lines else ""))
 
 
@@ -1116,6 +1118,8 @@ def plot_research_evaluation(
     regime_summary: pd.DataFrame,
     baseline_results: dict[str, object] | None = None,
     rolling_references: pd.DataFrame | None = None,
+    output_path: Path = Path('pipeline_research_eval.png'),
+    frontier_output_path: Path = Path('control_pareto_frontier.png'),
 ) -> None:
     """Create a paper-facing summary figure for the revised control-method study."""
     fig, axes = plt.subplots(2, 3, figsize=(20, 11))
@@ -1262,11 +1266,13 @@ def plot_research_evaluation(
     ax.set_ylabel('Mean annualized return')
     ax.grid(True, alpha=0.3)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig('pipeline_research_eval.png', dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
 
     if not control_summary.empty:
+        frontier_output_path.parent.mkdir(parents=True, exist_ok=True)
         frontier_fig, frontier_ax = plt.subplots(figsize=(8.5, 6.0))
         ranked = control_summary.copy()
         ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
@@ -1304,7 +1310,7 @@ def plot_research_evaluation(
         frontier_ax.set_ylabel('Mean annualized return')
         frontier_ax.grid(True, alpha=0.3)
         frontier_fig.tight_layout()
-        frontier_fig.savefig('control_pareto_frontier.png', dpi=150, bbox_inches='tight')
+        frontier_fig.savefig(frontier_output_path, dpi=150, bbox_inches='tight')
         plt.close(frontier_fig)
 
 

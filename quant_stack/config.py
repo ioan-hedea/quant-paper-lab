@@ -356,6 +356,8 @@ class PipelineConfig:
 class EvaluationConfig:
     """Grid settings for the research evaluation engine."""
 
+    output_dir: str = 'results'
+    timestamp_outputs: bool = True
     train_fracs: tuple[float, ...] = (0.4, 0.5, 0.6)
     rolling_train_frac: float = 0.5
     rolling_window_days: int = 504
