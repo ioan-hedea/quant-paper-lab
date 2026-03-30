@@ -64,15 +64,11 @@ yet decisive on that metric. No single method dominates every metric:
 volatility targeting and ensemble-min have the shallowest drawdowns,
 regime-aware rules remain the strongest low-complexity baseline, and learned
 meta-control is promising but still below the convexity-enhanced robust stack.
-The supported conclusion is therefore not that learning is the preferred
-control layer, but that systematic controller comparison is the right research
-question and that, in this frozen bundle, portfolio control is best understood
-as risk shaping and robust optimization refined by convexity-aware payoff
-shaping is the most defensible control mechanism.
+The paper's contribution is therefore a risk-shaping framework for portfolio control rather than benchmark rhetoric: in this frozen-bundle evaluation, downside-aware outcome selection plus convex payoff transformation dominates the learned alternatives, while learning is most useful as meta-control rather than as the primary decision layer.
 \end{abstract}
 
 \medskip
-\noindent\textbf{Keywords:} portfolio management, factor investing, control mechanisms, robust optimization, contextual bandits, reinforcement learning, backtesting
+\noindent\textbf{Keywords:} portfolio management, factor investing, control mechanisms, robust optimization, convex risk measures, algorithm selection, contextual bandits, reinforcement learning, backtesting
 ]
 
 \section{Introduction}
@@ -131,19 +127,7 @@ pipeline is production-ready. Rather, it is to assemble a well-motivated stack
 in which each modeling choice has a clear financial role and where performance
 can be decomposed into alpha generation, portfolio construction, and control.
 
-The central defended statement is therefore not that a specific learning method
-wins. It is that a finance-first alpha engine should be paired with a
-systematic controller comparison under explicit timing and cost assumptions.
-The finished frozen bundle shows that convexity-aware robust optimization now
-provides the strongest overall control outcome, that simple regime-aware rules
-are already competitive, and that the learning-based methods in this study do
-not beat the best optimization-based stack.
-The more novel claim is not merely that robust optimization beats RL in noisy
-financial data, which practitioners may already suspect. It is that the
-controllers in this study can be organized under one risk-shaping framework,
-and that the winning architecture combines two separable mechanisms: tail-aware
-selection of outcomes through CVaR and tail-aware reshaping of outcomes through
-convex payoff transformation.
+The central defended statement is therefore not that one more controller happened to win. The paper's main contribution is a risk-shaping framework for portfolio control under shared alpha, timing, and cost assumptions. Within that framework, the finished frozen-bundle shows that the winning design combines two distinct operations: tail-aware selection of portfolio outcomes through CVaR and tail-aware transformation of realized payoffs through convex protection. The learning results then sharpen the boundary of the design space rather than overturn it: learning helps most as meta-control over already-credible structured experts, not as the primary decision layer.
 
 \section{Related Literature and Design Motivation}
 
@@ -352,7 +336,7 @@ component.
 
 \subsection{Universe}
 
-The revised frozen bundle uses the expanded universe rather than the smaller
+The revised frozen-bundle uses the expanded universe rather than the smaller
 development basket. It contains 77 traded tickers spread across technology,
 financials, healthcare, consumer staples, energy, industrials, materials, real
 estate, utilities, communications, consumer discretionary, and diversifier
@@ -495,7 +479,7 @@ allocator.
 
 \subsection{Control Methods}
 
-The completed frozen bundle compares five families of control methods built on
+The completed frozen-bundle compares five families of control methods built on
 the same finance-first alpha engine and constrained allocator.
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \textbf{Alpha and fixed-rule baselines.} The suite includes
@@ -562,6 +546,10 @@ operators $\mathcal{Q}_\pi$; convexity is primarily an outcome operator
 $\mathcal{T}_\pi$; the council learns a mixture operator over expert policies;
 and the winning controller can be written compactly as
 $\mathcal{S}_{D+}=\mathcal{T}_{\text{convex}}\circ\mathcal{Q}_{\text{CVaR}}$.
+
+This operator lens also connects the controller comparison to classical distortion-risk ideas. Dual-theory and distorted-expectation views interpret risk control as transforming probabilities or outcomes rather than only changing point forecasts \cite{yaari1987,schmeidler1989,wang2000}. In that language, CVaR is a coherent left-tail distortion applied during portfolio selection, while the convexity layer is a discrete outcome distortion applied to realized returns. The framework therefore does more than label winners: it classifies controllers by how they reshape the induced return distribution.
+
+The key empirical result is therefore not only that \texttt{D+} wins, but that the winner composes two different risk-shaping operations. Most learning-based controllers in the bundle mainly act through a selection operator $\mathcal{Q}_\pi$. The convexity layer contributes through an outcome operator $\mathcal{T}_\pi$. The strongest controller is the first one in the study that combines both in a structured way.
 
 \begin{center}
 \small
@@ -743,7 +731,7 @@ rather than purely cosmetic.
 
 \section{Experimental Design}
 
-The revised frozen bundle used in the paper contains 3{,}269 daily observations
+The revised frozen-bundle used in the paper contains 3{,}269 daily observations
 from April 1, 2013 through March 27, 2026. The archived bundle reported here is
 the timestamped results folder \texttt{results/20260330\_033844}. It contains
 legacy ablations, 19 control-method candidates across three train/test split
@@ -838,7 +826,7 @@ alpha engine.
 
 The main result is the completed 19-method control-comparison suite.
 Table~\ref{tab:metrics} reports mean annualized performance across the three
-train/test split settings used in the frozen bundle.
+train/test split settings used in the frozen-bundle.
 
 \begin{table*}[t]
 \centering
@@ -915,8 +903,11 @@ setting. The correct claim is not that the paper ``beats SPY'' in general, but
 that \texttt{D\_plus\_convexity} is the strongest point-estimate challenger to
 SPY in this frozen-bundle evaluation. The cached reference-split bootstrap
 against SPY is also supportive on Sharpe ($\Delta \approx +0.45$,
-95\% CI $[0.02, 0.77]$, $p=0.045$), even though the return difference is not
-yet significant at that split.
+95\% CI $[0.06, 0.82]$, $p=0.015$), even though the return difference is not
+yet significant at that split. This SPY comparison is economic calibration
+rather than the paper's scientific contribution: the contribution is a
+principled comparison of control mechanisms under shared alpha, timing, and
+cost assumptions.
 
 The main answer to \textbf{RQ1} is now more layered than in the earlier draft.
 Among the base controllers, CVaR-aware robust optimization remains the
@@ -949,15 +940,27 @@ gating over learned payoff shaping. LinUCB remains the best non-meta learner at
 at 0.23 even after being given a more favorable 75/25 training split in the
 middle evaluation setting.
 
+Read as best-in-class representatives, the finished comparison is internally coherent: A4 is the best simple rule, B1 the best non-meta learner, G the best learned controller overall, F the best constrained learner, D the best robust baseline, and D+ the best overall controller. Figure~\ref{fig:control_overview} makes the same pattern visual.
+
+The MLP result is therefore not an isolated extra model. It is a boundary
+result. A more expressive learned gate does improve slightly on the logistic
+council (0.65 versus 0.64 Sharpe), which confirms that learning helps most at
+the meta-control layer. It is also the only learned controller numerically
+close to SPY, trailing on mean return but exceeding SPY on mean Sharpe and
+materially reducing drawdown. But that gain is still marginal relative to the
+jump from learned control to the robust stack, so expressive gating does not
+close the gap to explicit risk shaping.
+
 One important qualification is statistical rather than economic. The archived
 controller-to-controller bootstrap table compares plain
 \texttt{D\_cvar\_robust} against several alternatives at the reference split.
 Those tests show statistically significant annualized-return advantages versus
 the no-control alpha engine, regime rules, LinUCB, and supervised control, and
 statistically significant Sharpe improvements versus CMDP-Lagrangian and
-Q-learning RL. The new artifact bundle also includes a full reference-split
-bootstrap table for the headline extension \texttt{D\_plus\_convexity} against
-the entire controller set plus SPY.
+Q-learning RL. For the headline extension \texttt{D\_plus\_convexity},
+Table~\ref{tab:dplus_significance} reports the main pairwise comparisons and
+Appendix Table~\ref{tab:dplus_significance_full} reports the complete
+reference-split table against every controller plus SPY.
 
 \begin{table}[t]
 \centering
@@ -1006,6 +1009,8 @@ tension is now between the strongest overall trade-off in \texttt{D+}, the
 cleanest simple-rule protection in A4 and A2, and the more moderate adaptive
 learning behavior of the meta-controller variants.
 
+\begin{quote}\small\noindent\textbf{Why D+ wins.} (1) $\mathcal{Q}_{\text{CVaR}}$ improves tail-aware portfolio selection. (2) $\mathcal{T}_{\text{convex}}$ repairs the residual pathwise drawdown weakness of plain CVaR. (3) The composition preserves participation while reducing left-tail damage. (4) Learned controllers improve adaptivity, but not enough to replace explicit risk shaping.\end{quote}
+
 \paragraph{Regime-conditioned performance.}
 Reference-split regime slices clarify when each control style helps. During the
 2020 crash window (2020-02-19 to 2020-04-30), \texttt{D+} produced +9.0\%
@@ -1036,7 +1041,7 @@ optimization-based method.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{../../results/20260330_033844/control_method_overview.png}
-\caption{Control-comparison overview of the March 30 frozen bundle. The upper-left panel ranks all controllers by mean Sharpe, where \texttt{D+} leads, plain \texttt{D} remains the strongest non-extension baseline, and the MLP meta-controller is the strongest learned challenger. The remaining panels summarize return--drawdown trade-offs, the best method in each controller family, and Sharpe stability across train fractions.}
+\caption{Control-comparison overview of the March 30 frozen-bundle. The four panels rank all controllers by mean Sharpe, summarize return--drawdown trade-offs, report the best method in each controller family, and show Sharpe stability across train fractions. \texttt{D+} leads overall, plain \texttt{D} is the strongest non-extension baseline, and the MLP meta-controller is the strongest learned challenger.}
 \label{fig:control_overview}
 \end{figure*}
 }{
@@ -1082,10 +1087,7 @@ long-only caps, and group limits, which compresses both return and volatility.
 
 \begin{table*}[t]
 \centering
-\caption{Legacy ablation summary across train/test split settings. The
-factor-only row belongs to the archived pruning suite used to diagnose the old
-RL-heavy stack and is not directly comparable to the control-comparison
-factor-only baseline in Table~\ref{tab:metrics}.}
+\caption{Legacy ablation summary across train/test split settings for the retained pruning suite.}
 \label{tab:ablation_summary}
 \begingroup\small
 \begin{tabular}{@{} l r r r r r @{}}
@@ -1216,9 +1218,7 @@ Mean-Variance       & 9.2\% & 0.45 & $-$17.8\% & 0.52 \\
 \end{tabular}
 \end{table}
 
-The rolling-window and time-series cross-validation diagnostics remain useful,
-but they should now be read as diagnostics for the retained legacy branch, not
-as the main source of the paper's contribution. The rolling-window summary
+The rolling-window and time-series cross-validation diagnostics remain useful as appendix diagnostics for the retained legacy branch, not as main sources of evidence for the revised control-comparison claim. The rolling-window summary
 shows median full-pipeline Sharpe 0.59, median Calmar 1.09, and median maximum
 drawdown $-$8.9\%. The corresponding benchmark-beat fractions remain weak:
 the legacy full pipeline beats SPY on Sharpe in only 17\% of windows and beats
@@ -1230,19 +1230,10 @@ CV summary is similarly modest, with Sharpe 0.41 $\pm$ 0.57 and Calmar
 does not show a structural edge. Its main value in the revised paper is as a
 transparent negative result that motivated the broader controller comparison.
 
-\IfFileExists{../../results/20260330_033844/pipeline_rolling_windows.png}{
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/pipeline_rolling_windows.png}
-\caption{Rolling-window robustness for the retained legacy full pipeline. The
-pattern remains mixed: drawdown improves more often than Sharpe, and the
-windows should be interpreted as internal robustness slices from one
-historical sample rather than independent replications.}
-\label{fig:rollingwindows}
-\end{figure*}
-}{}
 
 \section{Discussion}
+
+The discussion can now be stated more directly. The paper's main contribution is a risk-shaping framework for portfolio control, not merely a 19-controller leaderboard. Under a shared alpha engine and shared timing/cost protocol, the winning design combines tail-aware selection of portfolio outcomes through CVaR with tail-aware transformation of realized payoffs through convex protection. The remaining controller comparisons then act as boundary results around that central mechanism.
 
 The experimental results support three conclusions of methodological importance.
 
@@ -1274,9 +1265,7 @@ performance. The positive exception is learned meta-control:
 their convexity-augmented variants give back Sharpe in exchange for somewhat
 shallower drawdowns. That makes meta-control a plausible refinement direction
 even though it still does not unseat \texttt{D+}. That negative result is not an
-embarrassment; it is part of the methodological contribution. The point of the
-revised paper is to delimit where learning helps and where simpler or more
-structured controllers remain stronger.
+embarrassment; it is part of the methodological contribution. The point of the revised paper is to delimit where learning helps and where simpler or more structured controllers remain stronger. Learning contributes most when it is used to arbitrate among already-credible structured controllers rather than to replace financial structure end to end.
 
 What did not work is therefore just as informative as what did. The old
 RL-heavy stack still collapses in the legacy ablation table. Drawdown-based
@@ -1366,6 +1355,8 @@ The expectation identity follows by expanding $g_m(R)$ pointwise and taking
 expectations. Thus convexity reduces lower-tail risk whenever the protected-tail
 gain dominates carry. \hfill $\square$
 
+In the reference D+ split, $\tau=0$, the strong-mode coefficient is $\lambda_m=4$, and the observed raw-return minimum is about $-11.3\%$, so assumption (i) implies $2\lambda_m(\tau-r_{\min})\approx 0.90<1$ and is satisfied in the reported sample.
+
 The key mechanism is now explicit: $g_m(r)\approx r-c(m)$ for ordinary states
 with $r\ge\tau$, while stressed states with $r<\tau$ receive a state-dependent
 upward adjustment. Convexity therefore improves performance by reshaping the
@@ -1398,8 +1389,7 @@ mixture-of-policies models,
 b_t = \sum_k \pi_k(x_t) b_t^{(k)},
 \]
 which approximates lightweight model averaging over interpretable experts. This
-reduces variance relative to relying on a single learned controller and helps
-explain why meta-control is the strongest learned family in the paper.
+reduces variance relative to relying on a single learned controller and helps explain why meta-control is the strongest learned family in the paper. The MLP gate analysis makes the mechanism more concrete. In the reference split, the CVaR weight has a +0.29 correlation with realized stress, the LinUCB weight a $-0.32$ correlation, and aggregate gate shifts a +0.61 correlation with regime-belief switches. The gate therefore reacts most around regime transitions by modestly leaning further toward robust control rather than by collapsing to a one-expert policy.
 
 At the same time, the meta-controllers still remain below D+. That gap is
 informative. Variance reduction alone is not enough to match direct
@@ -1407,7 +1397,15 @@ distributional shaping. The logistic council and the MLP gate can learn when to
 lean more heavily on CVaR, rules, or LinUCB, and the MLP gate slightly improves
 on the logistic council (0.65 versus 0.64 mean Sharpe), but neither changes the
 underlying payoff map as directly as D+. In that sense, meta-control is a
-useful refinement layer rather than a replacement for the robust stack.
+useful refinement layer rather than a replacement for the robust stack. A
+cached ex-post 50/25/25 blend of plain D, A4, and B1 return streams reaches
+about 0.92 mean Sharpe across the three split settings, which is above the
+0.64--0.65 range of the learned gates in Table~\ref{tab:metrics}. So the
+present learned gates are valuable as boundary results, but they do not yet
+outperform a strong static mixture of the same structured experts. That in
+turn sets up the broader control-versus-learning conclusion: learning helps
+most when it arbitrates among strong structured policies, not when it is asked
+to replace explicit risk shaping.
 
 \subsection{Control Versus Learning in Noisy Environments}
 
@@ -1443,15 +1441,7 @@ outcomes are selected and then transformed.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{../../results/20260330_033844/control_interpretability.png}
-\caption{Interpretability diagnostics for the revised extensions. Left: the
-reference-split MLP meta-controller keeps the largest weight on
-\texttt{D\_cvar\_robust} while adaptively reallocating the remainder across
-regime rules and LinUCB, which explains why it improves on the standalone
-learners while still remaining below \texttt{D+}. Right: convexity mode usage
-for \texttt{D\_plus\_convexity} shifts from mostly \texttt{none} in bull states
-to mostly \texttt{strong} in bear states. The figure supports the paper's
-headline mechanism claim: the gains come from state-dependent distribution
-shaping and expert selection, not from a new predictive signal.}
+\caption{Interpretability diagnostics for the revised extensions. Left: shaded 2020-crash and 2022-bear windows show that the reference-split MLP meta-controller remains centered on \texttt{D\_cvar\_robust} while adjusting most around regime transitions. Right: convexity mode usage for \texttt{D\_plus\_convexity} shifts from mostly \texttt{none} in bull states to mostly \texttt{strong} in bear states. Together the panels support the paper's headline mechanism claim: the gains come from state-dependent distribution shaping and expert selection, not from a new predictive signal.}
 \label{fig:interpretability}
 \end{figure*}
 }{}
@@ -1460,12 +1450,7 @@ shaping and expert selection, not from a new predictive signal.}
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\columnwidth]{../../results/20260330_033844/control_tail_diagnostic.png}
-\caption{Left-tail empirical distribution diagnostic for the reference split.
-Compared with factor-only and plain CVaR, \texttt{D+} shifts the worst-return
-mass inward and improves the 5\% tail summary while leaving average return
-roughly unchanged relative to plain \texttt{D}. The improvement of \texttt{D+}
-is therefore driven primarily by tail-risk reduction rather than by higher
-average returns alone.}
+\caption{Left-tail empirical distribution diagnostic for the reference split. Compared with factor-only and plain CVaR, \texttt{D+} shifts the worst-return mass inward and improves the 5\% tail summary while leaving average return roughly unchanged relative to plain \texttt{D}. At the reference split, the D+ layer improves 5\% CVaR by about 30 bps versus plain D, so the improvement is driven primarily by tail-risk reduction rather than by higher average returns alone.}
 \label{fig:taildiagnostic}
 \end{figure}
 }{}
@@ -1528,22 +1513,21 @@ The currently reported robustness summary is still based on only six rolling
 windows, five blocked time-series CV folds, and one underlying historical
 sample. The workshop interpretation should therefore be that the robustness
 engine is now part of the methodology, not that robustness has been exhaustively
-established across many independent market environments. The controller
-significance analysis is now substantially stronger, but it is still not
-exhaustive in the strongest possible sense. The new artifact bundle includes
-5{,}000-sample reference-split block-bootstrap tables for both plain
-\texttt{D\_cvar\_robust} and \texttt{D\_plus\_convexity} versus the full set of
-controller baselines plus SPY. Those tests now show direct Sharpe separation
-for D+ versus factor-only, regime rules, LinUCB, \texttt{G\_mlp\_meta}, and
-SPY, but not versus plain \texttt{D}. What remains future work is an
-aggregated multi-split or multi-window significance analysis, together with
-equally complete tables for the broader meta-controller family.
+established across many independent market environments. At the reference
+split, the D+ significance story is now complete rather than partial: the
+artifact bundle includes 5{,}000-sample block-bootstrap tables for
+\texttt{D\_plus\_convexity} versus every controller baseline plus SPY, and
+those tests show direct Sharpe separation for D+ versus factor-only, regime
+rules, LinUCB, \texttt{G\_mlp\_meta}, and SPY, but not versus plain
+\texttt{D}. What remains future work is an aggregated multi-split or
+multi-window significance analysis, together with equally complete tables for
+the broader meta-controller family.
 
 Natural next steps follow directly from this new result. The highest-value
-extensions are pairwise significance tests across the new controller families,
-broader universes and asset classes, stricter point-in-time data treatment,
-more systematic benchmark tuning, and deeper analysis of when council-style
-meta-control or convexity modes are activated. If more advanced learned
+extensions are broader universes and asset classes, stricter point-in-time data
+treatment, aggregated multi-split significance, more systematic benchmark
+tuning, and deeper analysis of when council-style meta-control or convexity
+modes are activated. If more advanced learned
 controllers re-enter the stack later, they should do so as separately validated
 comparators rather than as assumed core architecture.
 
@@ -1555,7 +1539,7 @@ shared finance-first alpha engine remains modular and interpretable; the main
 scientific question is which controller adds the most value once that engine is
 already in place.
 
-The completed frozen bundle gives a clear answer. The strongest overall
+The completed frozen-bundle gives a clear answer. The strongest overall
 point-estimate controller is the convexity-enhanced robust stack
 \texttt{D\_plus\_convexity}; simple regime-aware rules are the best practical
 low-complexity baseline; and the learning-based methods, including CMDP and
@@ -1563,15 +1547,7 @@ tabular RL, do not beat the best optimization-based approach. D+ is also the
 strongest point-estimate challenger to SPY in the completed bundle, while
 reference-split block-bootstrap already shows Sharpe separation versus
 factor-only, regime rules, LinUCB, and SPY, but not yet decisive Sharpe
-separation versus plain CVaR-robust. Equally
-importantly, the paper leaves behind a frozen-bundle evaluation protocol that
-can support future controller comparisons under a consistent empirical
-standard. In the reported sample, the evidence supports a stronger conceptual
-claim than the earlier draft: portfolio control is best understood here as
-return-distribution shaping. Explicitly distribution-aware optimization refined
-by convexity-aware payoff shaping is the strongest current control layer, and
-additional learning complexity is not necessary for daily portfolio
-rebalancing on top of the same finance-first alpha engine.
+separation versus plain CVaR-robust. Equally importantly, the paper leaves behind a frozen-bundle evaluation protocol that can support future controller comparisons under a consistent empirical standard. In the reported sample, the evidence supports a stronger conceptual claim than the earlier draft: portfolio control is best understood here as risk shaping. Explicitly distribution-aware optimization refined by convexity-aware payoff shaping is the strongest current control layer, while the MLP gate marks the strongest learned challenger and a clear boundary result. The paper does not claim that D+ is universally optimal; it claims that under a fixed finance-first alpha engine and shared experimental protocol, explicit risk shaping dominates the learned alternatives tested here.
 
 \appendix
 
@@ -1579,7 +1555,7 @@ rebalancing on top of the same finance-first alpha engine.
 
 \subsection{Revised-Study Snapshot}
 
-The revised frozen bundle reported in the paper corresponds to the simplified
+The revised frozen-bundle reported in the paper corresponds to the simplified
 finance-first stack summarized in Table~\ref{tab:archsnapshot}. The most
 important change relative to the earlier project versions is that the paper now
 evaluates a family of controllers on top of the same allocator rather than
@@ -1587,7 +1563,7 @@ trying to defend one learned controller in isolation.
 
 \begin{table*}[t]
 \centering
-\caption{Active study design in the revised frozen bundle.}
+\caption{Active study design in the revised frozen-bundle.}
 \label{tab:archsnapshot}
 \small
 \begin{tabular}{@{} l p{0.72\textwidth} @{}}
@@ -1607,27 +1583,65 @@ Legacy reference branch & RL-heavy full pipeline, PPO comparator, and pruning ab
 \subsection{Research Artifacts}
 
 For the revised timestamped bundle discussed in the paper, the research runner
-writes the artifacts below into \texttt{results/20260330\_012342/}:
+writes the artifacts below into \texttt{results/20260330\_033844/}:
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \texttt{research\_metrics.csv}: tabular output for ablation and robustness runs;
-\item \texttt{research\_control\_comparison.csv}: split-aggregated controller comparison across the 17 evaluated methods;
+\item \texttt{research\_control\_comparison.csv}: split-aggregated controller comparison across the 19 evaluated methods;
 \item \texttt{research\_ablation\_summary.csv}: split-aggregated ablation summaries;
 \item \texttt{research\_robustness\_summary.csv}: rolling-window medians and benchmark beat fractions;
 \item \texttt{research\_regime\_summary.csv}: regime-conditioned action, turnover, and return summaries;
 \item \texttt{research\_rolling\_references.csv}: rolling benchmark metrics for SPY and the factor-only benchmark;
 \item \texttt{research\_bootstrap\_cis.csv}: block-bootstrap confidence intervals for key strategy metrics;
-\item \texttt{research\_bootstrap\_significance.csv}: pairwise bootstrap deltas and $p$-value summaries versus benchmark strategies;
-\item \texttt{research\_control\_significance.csv}: controller-to-controller bootstrap deltas centered on the robust baseline;
-\item \texttt{research\_control\_significance\_full.csv}: 5{,}000-sample reference-split bootstrap deltas for plain \texttt{D} and \texttt{D+} versus the full controller set plus SPY;
-\item \texttt{research\_control\_significance\_dplus.csv}: the D+-centered slice of that full significance table;
+\item \texttt{research\_bootstrap\_significance.csv}: legacy-full-pipeline bootstrap deltas versus benchmark strategies;
+\item \texttt{research\_control\_significance.csv}: complete reference-split D+-versus-controller bootstrap deltas, including SPY;
+\item \texttt{research\_control\_significance\_full.csv}: full controller-significance table for the current bundle;
+\item \texttt{research\_control\_significance\_dplus.csv}: D+-centered slice of that table for direct manuscript use;
 \item \texttt{research\_jobson\_korkie.csv}: parametric Sharpe-ratio comparison tests;
 \item \texttt{research\_ts\_cv.csv}: blocked time-series cross-validation summaries;
-\item \texttt{research\_summary.json}: serialized configuration and best-per-suite summaries; and
-\item \texttt{pipeline\_research\_eval.png}: compact paper-facing summary figure;
+\item \texttt{research\_meta\_blend\_sanity.csv}: cached 50/25/25 fixed-blend sanity check versus the learned meta-controllers;
+\item \texttt{research\_mlp\_gate\_diagnostics.csv}: MLP gate stress, switch, and regime diagnostics;
+\item \texttt{research\_summary.json}: serialized configuration and best-per-suite summaries;
+\item \texttt{control\_method\_overview.png}: main paper figure summarizing controller ranking, trade-offs, and split stability;
 \item \texttt{control\_pareto\_frontier.png}: Pareto-frontier view of return versus drawdown;
-\item \texttt{pipeline\_rolling\_windows.png}: rolling-window robustness figure; and
+\item \texttt{control\_interpretability.png}: MLP gate and convexity activation diagnostic figure;
+\item \texttt{control\_tail\_diagnostic.png}: left-tail diagnostic comparing factor-only, plain D, and D+;
+\item \texttt{pipeline\_rolling\_windows.png}: appendix-only rolling-window diagnostic for the legacy branch; and
 \item \texttt{pipeline\_reward\_ablation.png}: reward-ablation figure.
 \end{enumerate}
+
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Complete reference-split pairwise significance table for \texttt{D+} versus every controller plus SPY (Sharpe deltas).}
+\label{tab:dplus_significance_full}
+\begin{tabular}{@{} l r r r @{}}
+\toprule
+\textbf{Comparator} & \textbf{$\Delta$Sharpe} & \textbf{95\% CI} & \textbf{$p$-value} \\
+\midrule
+No control (alpha engine) & +0.48 & [+0.13, +0.90] & 0.025 \\
+A1: Fixed & +0.48 & [+0.08, +0.88] & 0.015 \\
+A2: Vol-target & +0.59 & [+0.17, +1.08] & 0.000 \\
+A3: DD-Delever & +0.67 & [+0.20, +1.16] & 0.000 \\
+A4: Regime rules & +0.45 & [+0.06, +0.90] & 0.040 \\
+A5: Ensemble (mean) & +0.56 & [+0.16, +1.01] & 0.005 \\
+A5: Ensemble (min) & +0.63 & [+0.19, +1.10] & 0.005 \\
+B1: LinUCB & +0.47 & [+0.11, +0.90] & 0.010 \\
+B2: Thompson & +0.58 & [+0.15, +0.99] & 0.000 \\
+B3: Eps-greedy & +0.51 & [+0.13, +0.91] & 0.010 \\
+C: Supervised & +0.47 & [+0.08, +0.84] & 0.025 \\
+D: CVaR-robust & +0.12 & [-0.08, +0.32] & 0.490 \\
+E: Council & +0.26 & [-0.00, +0.49] & 0.060 \\
+E+: Council + convexity & +0.25 & [+0.05, +0.45] & 0.025 \\
+G: MLP meta & +0.28 & [+0.00, +0.54] & 0.045 \\
+G+: MLP meta + convexity & +0.24 & [+0.02, +0.43] & 0.015 \\
+F: CMDP-Lagrangian & +0.56 & [+0.16, +0.98] & 0.010 \\
+RL: Q-learning & +0.72 & [-0.06, +1.52] & 0.055 \\
+SPY & +0.45 & [+0.06, +0.82] & 0.015 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
 
 Together with the feature-availability contract embedded in each backtest run,
 these artifacts make it easier to compare results across alternative timing,
@@ -1636,12 +1650,17 @@ context after the fact.
 
 \subsection{Supplementary Diagnostic Figures}
 
-These figures are diagnostic and illustrative; the primary evidentiary claims
-of the paper rest on Tables~\ref{tab:metrics}--\ref{tab:legacy_bootstrap_significance}
-and Figures~\ref{fig:control_overview}, \ref{fig:control_heatmaps},
-\ref{fig:legacy_pruning}, and \ref{fig:rollingwindows}. The appendix
-intentionally focuses on figures produced directly by the revised timestamped
-bundle and omits older dashboards that are not tied to the reported evidence.
+These figures are diagnostic and illustrative, but the primary evidentiary claims of the paper now rest on Tables~\ref{tab:metrics}--\ref{tab:legacy_bootstrap_significance} and Figures~\ref{fig:control_overview}, \ref{fig:control_heatmaps}, \ref{fig:legacy_pruning}, \ref{fig:interpretability}, and \ref{fig:taildiagnostic}. The appendix intentionally keeps the rolling-window figure as a legacy robustness supplement rather than a main-text result.
+
+
+\IfFileExists{../../results/20260330_033844/pipeline_rolling_windows.png}{
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{../../results/20260330_033844/pipeline_rolling_windows.png}
+\caption{Appendix-only rolling-window robustness diagnostic for the retained legacy full pipeline. The pattern remains mixed: drawdown improves more often than Sharpe, and the windows should be interpreted as internal robustness slices from one historical sample rather than independent replications.}
+\label{fig:rollingwindows}
+\end{figure*}
+}{}
 
 \IfFileExists{../../results/20260330_033844/pipeline_reward_ablation.png}{
 \begin{figure*}[t]
@@ -1702,11 +1721,6 @@ R. F. Engle.
   variance of United Kingdom inflation.
 \newblock \emph{Econometrica}, 50(4):987--1007, 1982.
 
-\bibitem{engle1987}
-R. F. Engle and C. W. J. Granger.
-\newblock Co-integration and error correction: representation, estimation, and
-  testing.
-\newblock \emph{Econometrica}, 55(2):251--276, 1987.
 
 \bibitem{fama1993}
 E. F. Fama and K. R. French.
@@ -1773,6 +1787,22 @@ D. Pacheco Aznar.
 \newblock Portfolio management: A deep distributional reinforcement learning
   approach.
 \newblock \emph{SSRN Working Paper 4522084}, 2023.
+
+
+\bibitem{schmeidler1989}
+D. Schmeidler.
+\newblock Subjective probability and expected utility without additivity.
+\newblock \emph{Econometrica}, 57(3):571--587, 1989.
+
+\bibitem{wang2000}
+S. S. Wang.
+\newblock A class of distortion operators for pricing financial and insurance risks.
+\newblock \emph{Journal of Risk and Insurance}, 67(1):15--36, 2000.
+
+\bibitem{yaari1987}
+M. E. Yaari.
+\newblock The dual theory of choice under risk.
+\newblock \emph{Econometrica}, 55(1):95--115, 1987.
 
 \bibitem{sun2023}
 S. Sun, M. Qin, W. Zhang, H. Xia, C. Zong, J. Ying, Y. Xie, L. Zhao,

@@ -382,6 +382,7 @@ INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/times/ptmb8r.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/times/ptmri8t.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/vf/adobe/times/ptmri8t.vf
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/times/ptmri8r.tfm
+INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/times/ptmr8t.tfm
 INPUT ../../results/20260330_033844/control_method_overview.png
 INPUT ../../results/20260330_033844/control_method_overview.png
 INPUT ../../results/20260330_033844/control_method_overview.png
@@ -394,10 +395,8 @@ INPUT ../../results/20260329_experiments/legacy_pruning_story.png
 INPUT ../../results/20260329_experiments/legacy_pruning_story.png
 INPUT ../../results/20260329_experiments/legacy_pruning_story.png
 INPUT ../../results/20260329_experiments/legacy_pruning_story.png
-INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
-INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
-INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
-INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
+INPUT /usr/local/texlive/2026/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf
+INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/adobe/times/ptmr8r.tfm
 INPUT ../../results/20260330_033844/control_interpretability.png
 INPUT ../../results/20260330_033844/control_interpretability.png
 INPUT ../../results/20260330_033844/control_interpretability.png
@@ -406,6 +405,10 @@ INPUT ../../results/20260330_033844/control_tail_diagnostic.png
 INPUT ../../results/20260330_033844/control_tail_diagnostic.png
 INPUT ../../results/20260330_033844/control_tail_diagnostic.png
 INPUT ../../results/20260330_033844/control_tail_diagnostic.png
+INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
+INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
+INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
+INPUT ../../results/20260330_033844/pipeline_rolling_windows.png
 INPUT ../../results/20260330_033844/pipeline_reward_ablation.png
 INPUT ../../results/20260330_033844/pipeline_reward_ablation.png
 INPUT ../../results/20260330_033844/pipeline_reward_ablation.png

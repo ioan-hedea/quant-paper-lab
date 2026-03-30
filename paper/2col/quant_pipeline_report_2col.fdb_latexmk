@@ -1,10 +1,10 @@
 # Fdb version 4
-["pdflatex"] 1774840754.08554 "quant_pipeline_report_2col.tex" "quant_pipeline_report_2col.pdf" "quant_pipeline_report_2col" 1774840758.25686 0
+["pdflatex"] 1774843096.3387 "quant_pipeline_report_2col.tex" "quant_pipeline_report_2col.pdf" "quant_pipeline_report_2col" 1774843100.7225 0
   "../../results/20260329_experiments/legacy_pruning_story.png" 1774810113.25158 224385 5e9c722d521a6e2b78f015e206cc423a ""
-  "../../results/20260330_033844/control_interpretability.png" 1774840477.63662 310649 873409084d2b289ca13891dec0bc75b5 ""
-  "../../results/20260330_033844/control_method_overview.png" 1774840474.94609 812621 edd33281e09230ffc4e4690ebb261505 ""
-  "../../results/20260330_033844/control_pareto_frontier.png" 1774840475.82251 301739 40aa78bd096365e863df6c7b7ba106de ""
-  "../../results/20260330_033844/control_tail_diagnostic.png" 1774840477.8303 185418 57fec4f9d6c76bb87f95cfacb73f1077 ""
+  "../../results/20260330_033844/control_interpretability.png" 1774843047.05107 329402 dd32f29d850d418b03a60393474f25f9 ""
+  "../../results/20260330_033844/control_method_overview.png" 1774843044.26288 812621 edd33281e09230ffc4e4690ebb261505 ""
+  "../../results/20260330_033844/control_pareto_frontier.png" 1774843045.12714 301739 40aa78bd096365e863df6c7b7ba106de ""
+  "../../results/20260330_033844/control_tail_diagnostic.png" 1774843047.25927 202742 3a3ce3d3b3bcebc9028ad2fce09c3b81 ""
   "../../results/20260330_033844/pipeline_reward_ablation.png" 1774838916.92481 89809 3acfc2116de39dfcb32181530d3375a5 ""
   "../../results/20260330_033844/pipeline_rolling_windows.png" 1774838916.70129 97577 342b2c5ab123aa08477f81c976cf2642 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
@@ -208,9 +208,9 @@
   "/usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt" 1774559565 3636777 0a7b50578c2b7fc786152af658ee57ff ""
   "/usr/local/texlive/2026/texmf.cnf" 1774209515 577 648cd9f92f9c0eac486f4c71c85cfbbe ""
   "neurips_2025.sty" 1774711649.91028 1667 e6a4477dfb72a24e6de04350907eb318 ""
-  "quant_pipeline_report_2col.aux" 1774840758.09585 20014 50d73aaaf99f586de29551ef81f2e1d4 "pdflatex"
-  "quant_pipeline_report_2col.out" 1774840758.09772 8796 a70b1fc8b1a028315ae2d9bc7481b5cb "pdflatex"
-  "quant_pipeline_report_2col.tex" 1774840729.34455 92335 f884e052be2fbc1ef5d505a16ba78e92 ""
+  "quant_pipeline_report_2col.aux" 1774843100.59753 20200 8d120ae45bcbcf6407f8af79f251a540 "pdflatex"
+  "quant_pipeline_report_2col.out" 1774843100.59909 8796 a70b1fc8b1a028315ae2d9bc7481b5cb "pdflatex"
+  "quant_pipeline_report_2col.tex" 1774842890.86121 98558 3f9f5e5bc5484b17459406953d514288 ""
   (generated)
   "quant_pipeline_report_2col.aux"
   "quant_pipeline_report_2col.log"

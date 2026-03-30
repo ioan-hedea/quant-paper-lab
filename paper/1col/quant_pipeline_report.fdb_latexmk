@@ -1,10 +1,10 @@
 # Fdb version 4
-["pdflatex"] 1774840745.787 "quant_pipeline_report.tex" "quant_pipeline_report.pdf" "quant_pipeline_report" 1774840749.84832 0
+["pdflatex"] 1774843095.88095 "quant_pipeline_report.tex" "quant_pipeline_report.pdf" "quant_pipeline_report" 1774843100.23263 0
   "../../results/20260329_experiments/legacy_pruning_story.png" 1774810113.25158 224385 5e9c722d521a6e2b78f015e206cc423a ""
-  "../../results/20260330_033844/control_interpretability.png" 1774840477.63662 310649 873409084d2b289ca13891dec0bc75b5 ""
-  "../../results/20260330_033844/control_method_overview.png" 1774840474.94609 812621 edd33281e09230ffc4e4690ebb261505 ""
-  "../../results/20260330_033844/control_pareto_frontier.png" 1774840475.82251 301739 40aa78bd096365e863df6c7b7ba106de ""
-  "../../results/20260330_033844/control_tail_diagnostic.png" 1774840477.8303 185418 57fec4f9d6c76bb87f95cfacb73f1077 ""
+  "../../results/20260330_033844/control_interpretability.png" 1774843047.05107 329402 dd32f29d850d418b03a60393474f25f9 ""
+  "../../results/20260330_033844/control_method_overview.png" 1774843044.26288 812621 edd33281e09230ffc4e4690ebb261505 ""
+  "../../results/20260330_033844/control_pareto_frontier.png" 1774843045.12714 301739 40aa78bd096365e863df6c7b7ba106de ""
+  "../../results/20260330_033844/control_tail_diagnostic.png" 1774843047.25927 202742 3a3ce3d3b3bcebc9028ad2fce09c3b81 ""
   "../../results/20260330_033844/pipeline_reward_ablation.png" 1774838916.92481 89809 3acfc2116de39dfcb32181530d3375a5 ""
   "../../results/20260330_033844/pipeline_rolling_windows.png" 1774838916.70129 97577 342b2c5ab123aa08477f81c976cf2642 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
@@ -201,9 +201,9 @@
   "/usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt" 1774559565 3636777 0a7b50578c2b7fc786152af658ee57ff ""
   "/usr/local/texlive/2026/texmf.cnf" 1774209515 577 648cd9f92f9c0eac486f4c71c85cfbbe ""
   "neurips_2025.sty" 1774711704.81443 1667 e6a4477dfb72a24e6de04350907eb318 ""
-  "quant_pipeline_report.aux" 1774840749.74398 20032 574662a778c135124ac6796d1144023c "pdflatex"
-  "quant_pipeline_report.out" 1774840749.74563 8796 a70b1fc8b1a028315ae2d9bc7481b5cb "pdflatex"
-  "quant_pipeline_report.tex" 1774840729.34417 92695 c0f7f33757fbbea9988734dd8d5edb61 ""
+  "quant_pipeline_report.aux" 1774843100.09347 20594 51dd8a7d0149195be18cf6c034410069 "pdflatex"
+  "quant_pipeline_report.out" 1774843100.095 8796 a70b1fc8b1a028315ae2d9bc7481b5cb "pdflatex"
+  "quant_pipeline_report.tex" 1774843024.64579 99105 8b4a5dd88fc266c391b41d39e7b27bd3 ""
   (generated)
   "quant_pipeline_report.aux"
   "quant_pipeline_report.log"

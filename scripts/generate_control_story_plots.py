@@ -610,6 +610,32 @@ def plot_interpretability(out_path: Path) -> None:
         colors=["#2A9D8F", "#457B9D", "#D1495B"],
         alpha=0.92,
     )
+    stress = -np.asarray(meta.get("drawdowns", []), dtype=float)[:n_obs]
+    regime_series = np.asarray(meta.get("regime_beliefs", []), dtype=float)[:n_obs]
+    gate_shift = (
+        np.abs(np.diff(w_regime, prepend=w_regime[0]))
+        + np.abs(np.diff(w_linucb, prepend=w_linucb[0]))
+        + np.abs(np.diff(w_cvar, prepend=w_cvar[0]))
+    )
+    regime_switch = np.abs(np.diff(regime_series, prepend=regime_series[0]))
+    stress_corr = float(np.corrcoef(w_cvar, stress)[0, 1]) if n_obs > 1 else np.nan
+    switch_corr = float(np.corrcoef(gate_shift, regime_switch)[0, 1]) if n_obs > 1 else np.nan
+    for start, end, label, y in [
+        (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-04-30"), "2020 crash", 0.96),
+        (pd.Timestamp("2022-01-01"), pd.Timestamp("2022-12-31"), "2022 bear", 0.88),
+    ]:
+        ax.axvspan(start, end, color="#BDBDBD", alpha=0.12, linewidth=0)
+        ax.text(
+            start + (end - start) / 2,
+            y,
+            label,
+            transform=ax.get_xaxis_transform(),
+            ha="center",
+            va="top",
+            fontsize=8.5,
+            color="#555555",
+            fontweight="bold",
+        )
     ax.set_title(meta_title, fontweight="bold")
     ax.set_ylabel("Weight")
     ax.set_ylim(0, 1)
@@ -617,7 +643,8 @@ def plot_interpretability(out_path: Path) -> None:
     ax.text(
         0.98,
         0.05,
-        meta_note.format(cvar=w_cvar.mean(), rules=w_regime.mean(), linucb=w_linucb.mean()),
+        meta_note.format(cvar=w_cvar.mean(), rules=w_regime.mean(), linucb=w_linucb.mean())
+        + f"\nCVaR/stress corr {stress_corr:.2f}\nGate-switch corr {switch_corr:.2f}",
         transform=ax.transAxes,
         ha="right",
         va="bottom",
@@ -699,13 +726,24 @@ def plot_tail_diagnostic(out_path: Path) -> None:
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(9.5, 6.8))
 
+    tail_stats = {}
     for name, values in series.items():
         values = values[np.isfinite(values)]
         cdf = np.array([np.mean(values <= x) for x in grid], dtype=float)
         var5 = float(np.nanpercentile(values, 5))
         cvar5 = float(values[values <= var5].mean())
+        tail_stats[name] = {"var5": var5, "cvar5": cvar5}
         ax.plot(grid * 100, cdf, linewidth=2.2, color=colors[name], label=f"{name}  VaR5={var5*100:.2f}%  CVaR5={cvar5*100:.2f}%")
         ax.axvline(var5 * 100, color=colors[name], linewidth=1.0, alpha=0.25)
+
+    d_var_bps = (tail_stats["D+ Convexity"]["var5"] - tail_stats["D CVaR"]["var5"]) * 10000
+    d_cvar_bps = (tail_stats["D+ Convexity"]["cvar5"] - tail_stats["D CVaR"]["cvar5"]) * 10000
+    delta_handle = Line2D(
+        [0],
+        [0],
+        color="none",
+        label=f"D+ vs D  VaR5 {d_var_bps:+.1f} bps  CVaR5 {d_cvar_bps:+.1f} bps",
+    )
 
     ax.set_title("Left-Tail Distribution Diagnostic (Reference Split tf=0.50)", fontweight="bold")
     ax.set_xlabel("Daily return threshold")
@@ -714,11 +752,15 @@ def plot_tail_diagnostic(out_path: Path) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0%}"))
     ax.set_xlim(grid[0] * 100, grid[-1] * 100)
     ax.set_ylim(0, 0.22)
-    ax.legend(loc="upper left", fontsize=9, frameon=True)
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(delta_handle)
+    labels.append(delta_handle.get_label())
+    ax.legend(handles, labels, loc="upper left", fontsize=9, frameon=True)
     ax.text(
         0.98,
         0.04,
-        "D+ shifts the left tail inward:\nits worst-day mass is lower than both\nfactor-only and plain CVaR.",
+        "D+ shifts the left tail inward:\nits worst-day mass is lower than both\nfactor-only and plain CVaR.\n"
+        + f"Vs plain D: VaR5 {d_var_bps:+.1f} bps, CVaR5 {d_cvar_bps:+.1f} bps.",
         transform=ax.transAxes,
         ha="right",
         va="bottom",
