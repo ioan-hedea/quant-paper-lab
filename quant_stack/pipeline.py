@@ -18,6 +18,7 @@ from .controllers import (
     CMDPLagrangianController,
     CouncilController,
     CVaRRobustController,
+    MLPMetaController,
     build_control_state,
     build_controller,
 )
@@ -242,6 +243,9 @@ def run_full_pipeline(
         'convexity_carries': [], 'convexity_benefits': [], 'convexity_net_adjustments': [],
         'council_weight_regime_rules': [], 'council_weight_linucb': [], 'council_weight_cvar_robust': [],
         'council_dominant_expert': [], 'council_best_expert': [], 'council_gate_entropy': [],
+        'mlp_meta_weight_regime_rules': [], 'mlp_meta_weight_linucb': [], 'mlp_meta_weight_cvar_robust': [],
+        'mlp_meta_dominant_expert': [], 'mlp_meta_best_expert': [], 'mlp_meta_gate_entropy': [],
+        'mlp_meta_gate_source': [], 'mlp_meta_n_training_samples': [],
         'cmdp_lambdas': [], 'cmdp_constraint_costs': [], 'cmdp_violations': [],
         'control_method': control_method,
     }
@@ -416,7 +420,7 @@ def run_full_pipeline(
                 'convexity_net_adjustment': 0.0,
             }
 
-        if isinstance(controller, CouncilController):
+        if isinstance(controller, (CouncilController, MLPMetaController)):
             expert_feedback = {}
             for expert_name, expert_weights in controller.get_pending_expert_books().items():
                 eval_weights = expert_weights.reindex(tickers).fillna(0.0).clip(lower=0.0)
@@ -506,7 +510,7 @@ def run_full_pipeline(
                 wealth_path=results['wealth'],
                 t=t + 1,
             )
-            if isinstance(controller, CouncilController):
+            if isinstance(controller, (CouncilController, MLPMetaController)):
                 controller.update(
                     ctrl_state,
                     sharpe_reward,
@@ -603,6 +607,15 @@ def run_full_pipeline(
         results['council_dominant_expert'].append(str(controller_diagnostics.get('council_dominant_expert', 'none')))
         results['council_best_expert'].append(str(controller_diagnostics.get('council_best_expert', 'none')))
         results['council_gate_entropy'].append(float(controller_diagnostics.get('council_gate_entropy', 0.0)))
+        mlp_meta_weights = controller_diagnostics.get('mlp_meta_gate_weights', {}) if isinstance(controller_diagnostics, dict) else {}
+        results['mlp_meta_weight_regime_rules'].append(float(mlp_meta_weights.get('regime_rules', 0.0)))
+        results['mlp_meta_weight_linucb'].append(float(mlp_meta_weights.get('linucb', 0.0)))
+        results['mlp_meta_weight_cvar_robust'].append(float(mlp_meta_weights.get('cvar_robust', 0.0)))
+        results['mlp_meta_dominant_expert'].append(str(controller_diagnostics.get('mlp_meta_dominant_expert', 'none')))
+        results['mlp_meta_best_expert'].append(str(controller_diagnostics.get('mlp_meta_best_expert', 'none')))
+        results['mlp_meta_gate_entropy'].append(float(controller_diagnostics.get('mlp_meta_gate_entropy', 0.0)))
+        results['mlp_meta_gate_source'].append(str(controller_diagnostics.get('mlp_meta_gate_source', 'none')))
+        results['mlp_meta_n_training_samples'].append(int(controller_diagnostics.get('mlp_meta_n_training_samples', 0)))
         results['cmdp_lambdas'].append(float(controller_diagnostics.get('cmdp_lambda', 0.0)))
         results['cmdp_constraint_costs'].append(float(controller_diagnostics.get('cmdp_constraint_cost', 0.0)))
         results['cmdp_violations'].append(float(controller_diagnostics.get('cmdp_violation', 0.0)))

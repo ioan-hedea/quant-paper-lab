@@ -775,11 +775,10 @@ class CouncilController(BaseController):
     def _build_model(self):
         from sklearn.linear_model import LogisticRegression
 
-        return LogisticRegression(
-            max_iter=500,
-            multi_class='multinomial',
-            random_state=42,
-        )
+        # Keep the gate compatible across scikit-learn versions by relying on
+        # the library default multiclass handling instead of forcing an
+        # explicit keyword that is not accepted everywhere.
+        return LogisticRegression(max_iter=500, random_state=42)
 
     def _default_gate_weights(self, state: ControlState) -> np.ndarray:
         bias = self.default_bias
@@ -952,6 +951,358 @@ class CouncilController(BaseController):
             expert.reset()
 
 
+# ============================================================
+# G: MLP-Gated Meta-Controller (Environment-Adaptive Selection)
+# ============================================================
+
+class MLPMetaController(BaseController):
+    """MLP-gated meta-controller for environment-adaptive controller selection.
+
+    Addresses the algorithm-selection question: given current environment
+    characteristics (alpha quality, regime structure, volatility, market
+    stress), which sub-controller should be weighted most heavily?
+
+    Uses an MLP neural network over a rich environment feature vector
+    (computed from trailing windows of state history) to gate between
+    sub-controllers.  Falls back to heuristic default weights until
+    enough training data has been collected.
+    """
+
+    label = 'mlp_meta'
+
+    # ---- feature names (for diagnostics) ----
+    _FEATURE_NAMES = (
+        'alpha_mean', 'alpha_std', 'alpha_current_z',
+        'vol_mean', 'vol_of_vol', 'downside_semivol',
+        'dd_current', 'dd_mean_depth', 'dd_frequency',
+        'regime_mean', 'regime_switch_freq', 'regime_entropy', 'regime_risk_off_frac',
+        'trend_current', 'trend_mean',
+        'concentration_mean',
+    )
+
+    def __init__(self, config: ControlConfig) -> None:
+        super().__init__(config)
+        self.expert_names = tuple(config.mlp_meta_experts)
+        self.hidden_layers = tuple(config.mlp_meta_hidden_layers)
+        self.retrain_every = config.mlp_meta_retrain_every
+        self.min_samples = config.mlp_meta_min_samples
+        self.feature_lookback = config.mlp_meta_feature_lookback
+        self.temperature = config.mlp_meta_temperature
+        self.min_weight = config.mlp_meta_min_weight
+        self.default_bias = np.asarray(config.mlp_meta_default_bias, dtype=float)
+        self.learning_rate = config.mlp_meta_learning_rate
+        self.alpha_reg = config.mlp_meta_alpha_reg
+
+        # Sub-controllers
+        self.experts: dict[str, BaseController] = {
+            'regime_rules': RegimeRulesController(config),
+            'linucb': LinUCBBandit(config),
+            'cvar_robust': CVaRRobustController(config),
+        }
+        for name in self.expert_names:
+            if name not in self.experts:
+                raise ValueError(f"Unsupported mlp_meta expert: {name}")
+
+        # MLP gate model (sklearn)
+        self._model = None
+        self._feature_dim = len(self._FEATURE_NAMES)
+
+        # Trailing state history for environment feature extraction
+        self._state_history: deque[ControlState] = deque(maxlen=max(self.feature_lookback, 63))
+
+        # Training data buffers
+        self._feature_buffer: list[np.ndarray] = []
+        self._label_buffer: list[int] = []
+        self._last_train_t: int = -999
+
+        # Per-step bookkeeping
+        self._pending_features: np.ndarray | None = None
+        self._pending_gate: np.ndarray | None = None
+        self._pending_books: dict[str, pd.Series] = {}
+
+    # ------------------------------------------------------------------
+    # Environment feature extraction
+    # ------------------------------------------------------------------
+
+    def _compute_environment_features(self, state: ControlState) -> np.ndarray:
+        """Compute a rich environment feature vector from trailing state history.
+
+        Returns a 16-dimensional vector covering alpha quality,
+        risk/volatility, regime structure, trend, and concentration.
+        """
+        self._state_history.append(state)
+        hist = list(self._state_history)
+        n = len(hist)
+
+        # --- Alpha quality features ---
+        alphas = np.array([s.alpha_strength for s in hist])
+        alpha_mean = float(alphas.mean())
+        alpha_std = float(alphas.std()) if n > 1 else 0.0
+        alpha_current_z = float((state.alpha_strength - alpha_mean) / (alpha_std + 1e-8)) if n > 5 else 0.0
+
+        # --- Risk / volatility features ---
+        vols = np.array([s.recent_vol for s in hist])
+        vol_mean = float(vols.mean())
+        vol_of_vol = float(vols.std()) if n > 1 else 0.0
+        # Downside semi-volatility: std of vol values above the mean (stress periods)
+        above_mean = vols[vols > vol_mean]
+        downside_semivol = float(above_mean.std()) if len(above_mean) > 1 else 0.0
+
+        # --- Drawdown / market stress features ---
+        dds = np.array([s.recent_drawdown for s in hist])
+        dd_current = float(state.recent_drawdown)
+        dd_mean_depth = float(dds[dds < 0].mean()) if np.any(dds < 0) else 0.0
+        dd_frequency = float(np.mean(dds < -0.02))  # fraction of days in drawdown
+
+        # --- Regime features ---
+        beliefs = np.array([s.regime_belief for s in hist])
+        regime_mean = float(beliefs.mean())
+        # Switch frequency: fraction of consecutive days where belief crosses 0.5
+        if n > 1:
+            crossings = np.abs(np.diff((beliefs > 0.5).astype(float)))
+            regime_switch_freq = float(crossings.mean())
+        else:
+            regime_switch_freq = 0.0
+        # Regime entropy: entropy of the belief distribution
+        b_clipped = np.clip(beliefs, 1e-8, 1.0 - 1e-8)
+        regime_entropy = float(np.mean(-b_clipped * np.log(b_clipped) - (1 - b_clipped) * np.log(1 - b_clipped)))
+        regime_risk_off_frac = float(np.mean(beliefs < 0.30))
+
+        # --- Trend features ---
+        trends = np.array([s.trend for s in hist])
+        trend_current = float(state.trend)
+        trend_mean = float(trends.mean())
+
+        # --- Concentration features ---
+        concentrations = np.array([s.concentration for s in hist])
+        concentration_mean = float(concentrations.mean())
+
+        return np.array([
+            alpha_mean, alpha_std, alpha_current_z,
+            vol_mean, vol_of_vol, downside_semivol,
+            dd_current, dd_mean_depth, dd_frequency,
+            regime_mean, regime_switch_freq, regime_entropy, regime_risk_off_frac,
+            trend_current, trend_mean,
+            concentration_mean,
+        ], dtype=float)
+
+    # ------------------------------------------------------------------
+    # Gate logic
+    # ------------------------------------------------------------------
+
+    def _default_gate_weights(self, state: ControlState) -> np.ndarray:
+        """Heuristic default gate used before the MLP has enough data."""
+        bias = self.default_bias
+        if len(bias) != len(self.expert_names):
+            bias = np.ones(len(self.expert_names), dtype=float)
+        bias = np.clip(bias, 1e-4, None)
+        logits = np.log(bias / bias.sum())
+
+        risk_pressure = (
+            6.0 * max(0.0, abs(state.recent_drawdown) - 0.03)
+            + 3.0 * max(0.0, state.recent_vol - 0.15)
+            + 2.0 * max(0.0, 0.50 - state.regime_belief)
+        )
+        alpha_pressure = max(0.0, state.alpha_strength - 0.50)
+        adjustments: list[float] = []
+        for name in self.expert_names:
+            if name == 'regime_rules':
+                adjustments.append(0.50 * state.regime_belief + 0.20 * alpha_pressure)
+            elif name == 'linucb':
+                adjustments.append(0.60 * alpha_pressure - 0.20 * risk_pressure)
+            elif name == 'cvar_robust':
+                adjustments.append(0.80 * risk_pressure - 0.20 * alpha_pressure)
+            else:
+                adjustments.append(0.0)
+        return _stable_softmax(logits + np.asarray(adjustments, dtype=float), self.temperature)
+
+    def _predict_gate_weights(self, state: ControlState) -> tuple[np.ndarray, np.ndarray]:
+        """Return (feature_vector, gate_weights) using MLP or default."""
+        x = self._compute_environment_features(state)
+        if self._model is None:
+            return x, self._default_gate_weights(state)
+
+        probs = np.asarray(self._model.predict_proba(x.reshape(1, -1))[0], dtype=float)
+        full = np.zeros(len(self.expert_names), dtype=float)
+        classes = np.asarray(getattr(self._model, 'classes_', np.arange(len(self.expert_names))), dtype=int)
+        for cls_idx, prob in zip(classes, probs):
+            if 0 <= int(cls_idx) < len(full):
+                full[int(cls_idx)] = float(prob)
+        full = np.clip(full, 1e-8, None)
+        full /= full.sum()
+        full = np.maximum(full, self.min_weight)
+        full /= full.sum()
+        return x, full
+
+    # ------------------------------------------------------------------
+    # MLP training
+    # ------------------------------------------------------------------
+
+    def _build_model(self):
+        from sklearn.neural_network import MLPClassifier
+
+        return MLPClassifier(
+            hidden_layer_sizes=self.hidden_layers,
+            activation='relu',
+            solver='adam',
+            alpha=self.alpha_reg,
+            learning_rate_init=self.learning_rate,
+            max_iter=300,
+            early_stopping=True,
+            validation_fraction=0.15,
+            n_iter_no_change=15,
+            random_state=42,
+        )
+
+    def _try_retrain(self, t: int) -> None:
+        if t - self._last_train_t < self.retrain_every:
+            return
+        if len(self._label_buffer) < self.min_samples:
+            return
+        y = np.asarray(self._label_buffer, dtype=int)
+        if len(np.unique(y)) < 2:
+            return
+        X = np.asarray(self._feature_buffer, dtype=float)
+        # Standardize features for MLP
+        mu = X.mean(axis=0)
+        sigma = X.std(axis=0) + 1e-8
+        X_scaled = (X - mu) / sigma
+        model = self._build_model()
+        model.fit(X_scaled, y)
+        self._model = model
+        self._scaler_mu = mu
+        self._scaler_sigma = sigma
+        self._last_train_t = t
+
+    # ------------------------------------------------------------------
+    # Controller interface
+    # ------------------------------------------------------------------
+
+    def compute_invested_fraction(self, state: ControlState) -> float:
+        return 1.0  # meta-controller produces direct weights
+
+    def uses_direct_weights(self) -> bool:
+        return True
+
+    def get_pending_expert_books(self) -> dict[str, pd.Series]:
+        return {name: w.copy() for name, w in self._pending_books.items()}
+
+    def build_target_weights(
+        self,
+        allocator,
+        factor_scores: pd.Series,
+        alpha_scores: pd.Series,
+        confidence: pd.Series,
+        recent_returns: pd.DataFrame | None,
+        prev_weights: pd.Series | None,
+        optimizer_config,
+        state: ControlState,
+    ) -> pd.Series | None:
+        # Base constrained target (shared across non-CVaR experts)
+        constrained_target = allocator.optimize_target_book(
+            factor_scores=factor_scores,
+            alpha_scores=alpha_scores,
+            confidence=confidence,
+            recent_returns=recent_returns,
+            prev_weights=prev_weights,
+        ).clip(lower=0.0)
+        constrained_target = constrained_target / (constrained_target.sum() + 1e-8)
+
+        # Build each expert's book
+        expert_books: dict[str, pd.Series] = {}
+        for expert_name in self.expert_names:
+            expert = self.experts[expert_name]
+            if isinstance(expert, CVaRRobustController):
+                expert_books[expert_name] = expert.build_target_weights(
+                    allocator=allocator,
+                    factor_scores=factor_scores,
+                    alpha_scores=alpha_scores,
+                    confidence=confidence,
+                    recent_returns=recent_returns,
+                    prev_weights=prev_weights,
+                    optimizer_config=optimizer_config,
+                    state=state,
+                ).clip(lower=0.0)
+            else:
+                frac = float(np.clip(expert.compute_invested_fraction(state), 0.0, 1.0))
+                expert_books[expert_name] = (constrained_target * frac).clip(lower=0.0)
+
+        # MLP gate
+        x, gate_weights = self._predict_gate_weights(state)
+
+        # Soft-mix expert books
+        combined = pd.Series(0.0, index=constrained_target.index, dtype=float)
+        council_weights_map: dict[str, float] = {}
+        for expert_name, gw in zip(self.expert_names, gate_weights):
+            combined = combined.add(expert_books[expert_name] * float(gw), fill_value=0.0)
+            council_weights_map[expert_name] = float(gw)
+
+        combined = combined.clip(lower=0.0)
+        if float(combined.sum()) > 1.0:
+            combined = combined / float(combined.sum())
+
+        dominant_idx = int(np.argmax(gate_weights))
+        dominant_expert = self.expert_names[dominant_idx]
+        self._pending_features = x
+        self._pending_gate = gate_weights
+        self._pending_books = expert_books
+        self._latest_diagnostics.update({
+            'mlp_meta_gate_weights': council_weights_map,
+            'mlp_meta_dominant_expert': dominant_expert,
+            'mlp_meta_gate_entropy': float(-np.sum(gate_weights * np.log(gate_weights + 1e-8))),
+            'mlp_meta_gate_source': 'mlp' if self._model is not None else 'heuristic',
+            'mlp_meta_n_training_samples': len(self._label_buffer),
+        })
+        return combined
+
+    def update(
+        self,
+        state: ControlState,
+        reward: float,
+        next_state: ControlState,
+        expert_feedback: dict[str, float] | None = None,
+    ) -> None:
+        if self._pending_features is None:
+            return
+
+        if expert_feedback:
+            best_expert = max(expert_feedback.items(), key=lambda item: item[1])[0]
+            if best_expert in self.expert_names:
+                feat = self._pending_features
+                if self._model is not None and hasattr(self, '_scaler_mu'):
+                    feat = (feat - self._scaler_mu) / self._scaler_sigma
+                self._feature_buffer.append(self._pending_features)
+                self._label_buffer.append(self.expert_names.index(best_expert))
+                self._latest_diagnostics['mlp_meta_best_expert'] = best_expert
+                self._latest_diagnostics['mlp_meta_expert_rewards'] = {
+                    name: float(v) for name, v in expert_feedback.items()
+                }
+                for expert_name, expert in self.experts.items():
+                    expert_reward = float(expert_feedback.get(expert_name, reward))
+                    expert.update(state, expert_reward, next_state)
+        else:
+            dominant_idx = int(np.argmax(self._pending_gate)) if self._pending_gate is not None else 0
+            self._feature_buffer.append(self._pending_features)
+            self._label_buffer.append(dominant_idx)
+            self._latest_diagnostics['mlp_meta_best_expert'] = self.expert_names[dominant_idx]
+
+        self._try_retrain(next_state.t)
+        self._pending_features = None
+        self._pending_gate = None
+        self._pending_books = {}
+
+    def reset(self) -> None:
+        self._model = None
+        self._state_history.clear()
+        self._feature_buffer.clear()
+        self._label_buffer.clear()
+        self._pending_features = None
+        self._pending_gate = None
+        self._pending_books = {}
+        for expert in self.experts.values():
+            expert.reset()
+
+
 # Q-Learning Controller (wraps existing PortfolioConstructionRL)
 # ============================================================
 
@@ -1070,6 +1421,7 @@ def build_controller(config: ControlConfig) -> BaseController:
         'supervised': SupervisedController,
         'cvar_robust': CVaRRobustController,
         'council': CouncilController,
+        'mlp_meta': MLPMetaController,
         'cmdp_lagrangian': CMDPLagrangianController,
         'q_learning': QLearningController,
     }

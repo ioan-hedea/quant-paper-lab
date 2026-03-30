@@ -237,6 +237,7 @@ CONTROL_METHODS = (
     'supervised',            # C:  Supervised regime-conditioned controller
     'cvar_robust',           # D:  CVaR-aware robust optimization
     'council',               # E:  Expert-gated council meta-controller
+    'mlp_meta',              # G:  MLP-gated meta-controller (environment-adaptive)
     'cmdp_lagrangian',       # F:  Simple constrained-MDP controller
     'q_learning',            # RL: Tabular Q-learning (portfolio only)
     'ppo',                   # RL: End-to-end PPO
@@ -305,6 +306,17 @@ class ControlConfig:
     convexity_strong_vol: float = 0.26
     convexity_mild_regime: float = 0.45
     convexity_strong_regime: float = 0.30
+    # G: MLP Meta-controller (environment-adaptive controller selection)
+    mlp_meta_experts: tuple[str, ...] = ('regime_rules', 'linucb', 'cvar_robust')
+    mlp_meta_hidden_layers: tuple[int, ...] = (32, 16)
+    mlp_meta_retrain_every: int = 63
+    mlp_meta_min_samples: int = 60
+    mlp_meta_feature_lookback: int = 63
+    mlp_meta_min_weight: float = 0.10
+    mlp_meta_default_bias: tuple[float, ...] = (0.20, 0.20, 0.60)
+    mlp_meta_learning_rate: float = 0.001
+    mlp_meta_alpha_reg: float = 0.001
+    mlp_meta_temperature: float = 1.0
     # Q-learning (portfolio only)
     ql_alpha: float = 0.03
     ql_gamma: float = 0.95

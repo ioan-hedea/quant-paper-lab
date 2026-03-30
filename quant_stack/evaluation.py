@@ -655,6 +655,27 @@ def build_control_comparison_suite(base_config: PipelineConfig) -> list[Pipeline
     council_convex.enable_e2e_baseline = False
     configs.append(council_convex)
 
+    # G: MLP-gated meta-controller
+    mlp_meta = copy.deepcopy(base_config)
+    mlp_meta.experiment = copy.deepcopy(shared_experiment)
+    mlp_meta.experiment.label = 'G_mlp_meta'
+    mlp_meta.experiment.control_method = 'mlp_meta'
+    mlp_meta.control = ControlConfig(method='mlp_meta')
+    mlp_meta.enable_e2e_baseline = False
+    configs.append(mlp_meta)
+
+    # G+: MLP meta-controller plus convexity
+    mlp_meta_convex = copy.deepcopy(base_config)
+    mlp_meta_convex.experiment = copy.deepcopy(shared_experiment)
+    mlp_meta_convex.experiment.label = 'G_plus_convexity'
+    mlp_meta_convex.experiment.control_method = 'mlp_meta'
+    mlp_meta_convex.control = ControlConfig(
+        method='mlp_meta',
+        convexity_enabled=True,
+    )
+    mlp_meta_convex.enable_e2e_baseline = False
+    configs.append(mlp_meta_convex)
+
     # F: CMDP-style constrained controller
     cmdp = copy.deepcopy(base_config)
     cmdp.experiment = copy.deepcopy(shared_experiment)
@@ -821,6 +842,8 @@ def _display_label(label: str) -> str:
         'D_plus_convexity': 'D+: CVaR + Convexity',
         'E_council': 'E: Council',
         'E_plus_convexity': 'E+: Council + Convexity',
+        'G_mlp_meta': 'G: MLP Meta',
+        'G_plus_convexity': 'G+: MLP Meta + Convexity',
         'F_cmdp_lagrangian': 'F: CMDP-Lagrangian',
         'RL_q_learning': 'RL: Q-Learning',
         'RL_ppo': 'RL: PPO',
@@ -906,6 +929,8 @@ def _build_control_comparison_summary(metrics: pd.DataFrame) -> pd.DataFrame:
         'D_plus_convexity',
         'E_council',
         'E_plus_convexity',
+        'G_mlp_meta',
+        'G_plus_convexity',
         'F_cmdp_lagrangian',
         'RL_q_learning',
         'RL_ppo',
@@ -1663,6 +1688,11 @@ def run_research_evaluation(
     macro_data = macro_data if macro_data is not None else pd.DataFrame(index=returns.index)
     sec_quality_scores = sec_quality_scores if sec_quality_scores is not None else pd.Series(dtype=float)
     checkpoint_dir = Path(evaluation_config.checkpoint_dir)
+    run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_root = Path(evaluation_config.output_dir)
+    output_dir = output_root / run_timestamp if evaluation_config.timestamp_outputs else output_root
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Research outputs will be written to: {output_dir}")
     if evaluation_config.enable_checkpoints:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         print(f"Research checkpoints enabled: {checkpoint_dir}")
@@ -2114,34 +2144,65 @@ def run_research_evaluation(
             seed=evaluation_config.bootstrap_seed,
         )
 
-    if control_results_by_label and 'D_cvar_robust' in control_results_by_label:
+    if control_results_by_label:
         control_path_map = {
             label: result.get('wealth', [1.0])
             for label, result in control_results_by_label.items()
         }
-        control_compare_labels = [
-            label for label in [
-                'factor_only',
-                'A4_regime_rules',
-                'B1_linucb',
-                'C_supervised',
-                'D_plus_convexity',
-                'E_council',
-                'E_plus_convexity',
-                'F_cmdp_lagrangian',
-                'RL_q_learning',
-            ]
-            if label in control_path_map
-        ]
-        control_significance = _compute_bootstrap_pairwise_significance(
-            path_map=control_path_map,
-            base_label='D_cvar_robust',
-            compare_labels=control_compare_labels,
-            n_samples=evaluation_config.bootstrap_samples,
-            block_size=evaluation_config.bootstrap_block_size,
-            seed=evaluation_config.bootstrap_seed + 101,
+        spy_reference = next(
+            (result.get('spy') for result in control_results_by_label.values() if result.get('spy') is not None),
+            None,
         )
-        control_significance = _decorate_control_significance(control_significance)
+        if spy_reference is not None:
+            control_path_map['SPY'] = spy_reference
+
+        significance_frames: list[pd.DataFrame] = []
+        significance_bases = [
+            ('D_cvar_robust', evaluation_config.bootstrap_seed + 101),
+            ('D_plus_convexity', evaluation_config.bootstrap_seed + 151),
+        ]
+        for base_label, seed in significance_bases:
+            if base_label not in control_path_map:
+                continue
+            compare_labels = [
+                label for label in [
+                    'factor_only',
+                    'A1_fixed',
+                    'A2_vol_target',
+                    'A3_dd_delever',
+                    'A4_regime_rules',
+                    'A5_ensemble_mean',
+                    'A5_ensemble_min',
+                    'B1_linucb',
+                    'B2_thompson',
+                    'B3_epsilon_greedy',
+                    'C_supervised',
+                    'D_cvar_robust',
+                    'D_plus_convexity',
+                    'E_council',
+                    'E_plus_convexity',
+                    'G_mlp_meta',
+                    'G_plus_convexity',
+                    'F_cmdp_lagrangian',
+                    'RL_q_learning',
+                    'SPY',
+                ]
+                if label in control_path_map and label != base_label
+            ]
+            significance_frames.append(
+                _compute_bootstrap_pairwise_significance(
+                    path_map=control_path_map,
+                    base_label=base_label,
+                    compare_labels=compare_labels,
+                    n_samples=evaluation_config.bootstrap_samples,
+                    block_size=evaluation_config.bootstrap_block_size,
+                    seed=seed,
+                )
+            )
+        if significance_frames:
+            control_significance = _decorate_control_significance(
+                pd.concat(significance_frames, ignore_index=True)
+            )
 
     # Jobson-Korkie Sharpe ratio equality test
     jk_table = pd.DataFrame()
@@ -2152,7 +2213,7 @@ def run_research_evaluation(
             compare_labels=['SPY', 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
         )
         if not jk_table.empty:
-            jk_table.to_csv('research_jobson_korkie.csv', index=False)
+            jk_table.to_csv(output_dir / 'research_jobson_korkie.csv', index=False)
             print("\nJobson-Korkie Sharpe ratio tests:")
             for _, row in jk_table.iterrows():
                 print(f"  Full Pipeline vs {row['compare_label']}: "
@@ -2167,7 +2228,7 @@ def run_research_evaluation(
             base_config, evaluation_config.ts_cv_folds,
         )
         if not ts_cv_results.empty:
-            ts_cv_results.to_csv('research_ts_cv.csv', index=False)
+            ts_cv_results.to_csv(output_dir / 'research_ts_cv.csv', index=False)
             print(f"\n  TS-CV Summary ({len(ts_cv_results)} folds):")
             print(f"    Sharpe: {ts_cv_results['sharpe'].mean():.2f} "
                   f"± {ts_cv_results['sharpe'].std():.2f}")
@@ -2180,31 +2241,55 @@ def run_research_evaluation(
                 metric_rows.append(dict(row))
             metrics = pd.DataFrame(metric_rows)
 
-    metrics.to_csv('research_metrics.csv', index=False)
-    regime_summary.to_csv('research_regime_summary.csv', index=False)
-    rolling_references.to_csv('research_rolling_references.csv', index=False)
-    ablation_summary.to_csv('research_ablation_summary.csv', index=False)
+    metrics.to_csv(output_dir / 'research_metrics.csv', index=False)
+    regime_summary.to_csv(output_dir / 'research_regime_summary.csv', index=False)
+    rolling_references.to_csv(output_dir / 'research_rolling_references.csv', index=False)
+    ablation_summary.to_csv(output_dir / 'research_ablation_summary.csv', index=False)
     if not control_comparison_summary.empty:
-        control_comparison_summary.to_csv('research_control_comparison.csv', index=False)
+        control_comparison_summary.to_csv(output_dir / 'research_control_comparison.csv', index=False)
         print("\n  Control Comparison Summary:")
         for _, row in control_comparison_summary.iterrows():
             print(f"    {row['component_label']:25s}  Sharpe={row['mean_sharpe']:.2f}  "
                   f"Calmar={row['mean_calmar']:.2f}  MaxDD={row['mean_max_drawdown']:.1%}")
-    robustness_summary.to_csv('research_robustness_summary.csv', index=False)
+    robustness_summary.to_csv(output_dir / 'research_robustness_summary.csv', index=False)
     if not bootstrap_cis.empty:
-        bootstrap_cis.to_csv('research_bootstrap_cis.csv', index=False)
+        bootstrap_cis.to_csv(output_dir / 'research_bootstrap_cis.csv', index=False)
     if not bootstrap_significance.empty:
-        bootstrap_significance.to_csv('research_bootstrap_significance.csv', index=False)
+        bootstrap_significance.to_csv(output_dir / 'research_bootstrap_significance.csv', index=False)
     if not control_significance.empty:
-        control_significance.to_csv('research_control_significance.csv', index=False)
-    _write_research_tables(ablation_summary, robustness_summary, bootstrap_significance=bootstrap_significance)
-    plot_research_evaluation(metrics, regime_summary, baseline_results=baseline_results, rolling_references=rolling_references)
-    plot_rolling_windows(metrics, rolling_references_df=rolling_references if not rolling_references.empty else None)
-    plot_reward_ablation(metrics)
+        control_significance.to_csv(output_dir / 'research_control_significance.csv', index=False)
+    _write_research_tables(
+        ablation_summary,
+        robustness_summary,
+        output_path=Path('paper/2col/research_paper_tables.tex'),
+        bootstrap_significance=bootstrap_significance,
+    )
+    _write_research_tables(
+        ablation_summary,
+        robustness_summary,
+        output_path=output_dir / 'research_paper_tables.tex',
+        bootstrap_significance=bootstrap_significance,
+    )
+    plot_research_evaluation(
+        metrics,
+        regime_summary,
+        baseline_results=baseline_results,
+        rolling_references=rolling_references,
+        output_path=output_dir / 'pipeline_research_eval.png',
+        frontier_output_path=output_dir / 'control_pareto_frontier.png',
+    )
+    plot_rolling_windows(
+        metrics,
+        rolling_references_df=rolling_references if not rolling_references.empty else None,
+        output_path=output_dir / 'pipeline_rolling_windows.png',
+    )
+    plot_reward_ablation(metrics, output_path=output_dir / 'pipeline_reward_ablation.png')
 
     summary = {
         'base_config': asdict(base_config),
         'evaluation_config': asdict(evaluation_config),
+        'run_timestamp': run_timestamp,
+        'output_dir': str(output_dir),
         'n_metric_rows': len(metrics),
         'n_regime_rows': len(regime_summary),
         'ablation_summary': ablation_summary.to_dict(orient='records'),
@@ -2222,7 +2307,7 @@ def run_research_evaluation(
             for suite, group in metrics.groupby('suite')
         },
     }
-    with open('research_summary.json', 'w', encoding='utf-8') as handle:
+    with (output_dir / 'research_summary.json').open('w', encoding='utf-8') as handle:
         json.dump(summary, handle, indent=2)
 
     if evaluation_config.enable_checkpoints:
@@ -2245,4 +2330,5 @@ def run_research_evaluation(
         'bootstrap_significance': bootstrap_significance,
         'control_significance': control_significance,
         'summary': summary,
+        'output_dir': output_dir,
     }

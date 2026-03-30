@@ -1,0 +1,221 @@
+# controller predictor mlp nn
+
+
+- If you're willing to do real work, the thing that would genuinely move this into a different league is treating the controller comparison as a meta-learning problem and asking: given a new alpha engine and a new universe, how quickly can you identify the best controller without running all 17? That's a transfer learning or algorithm selection question, and your frozen-bundle methodology is actually a natural laboratory for it. It would require running the full suite on your second universe (which you're doing anyway) and then asking whether controller rankings transfer, and what features of the environment predict which controller wins. That's a paper with a question nobody has cleanly answered and a dataset — your frozen bundle across two universes — that lets you address it.
+# 🚀 Meta-Learning / Controller-Selection Extension — TODOs
+
+This extension asks a new question on top of the current paper:
+
+> **Given a new environment (alpha engine + universe + regime structure), can we identify the best controller without exhaustively running all candidates?**
+
+This is a **meta-learning / algorithm-selection** direction and can significantly strengthen the paper’s novelty if implemented cleanly.
+
+---
+
+# 1. New Research Question
+
+## Add new research question
+
+**RQ4: Controller selection across environments.**  
+Given a new environment, can the best controller be predicted from environment characteristics without exhaustively evaluating the full controller suite?
+
+---
+
+# 2. Define the Meta-Learning Setting
+
+## Formalize the objects
+
+- `e ∈ E`: environment  
+  - defined by:
+    - universe
+    - evaluation period / split
+    - alpha behavior
+    - volatility / regime structure
+    - correlation structure
+
+- `π ∈ Π`: controller candidate  
+  - one of the controllers already in the paper
+
+- `J(e, π)`: controller performance in environment `e`  
+  - e.g. Sharpe, Calmar, or a combined score
+
+---
+
+## Add formulation
+
+Current paper solves:
+
+\[
+\pi^*(e) = \arg\max_{\pi \in \Pi} J(e,\pi)
+\]
+
+New meta-learning extension asks whether we can learn:
+
+\[
+\hat{\pi}(e_{\text{new}}) \approx \arg\max_{\pi \in \Pi} J(e_{\text{new}}, \pi)
+\]
+
+without evaluating all controllers on `e_new`.
+
+---
+
+# 3. Build the Environment Dataset
+
+## Create a meta-dataset of environments
+
+Each environment should correspond to one fully evaluated setting, for example:
+
+- universe A, split 0.4
+- universe A, split 0.5
+- universe A, split 0.6
+- universe B, split 0.4
+- universe B, split 0.5
+- universe B, split 0.6
+- optional: rolling windows as additional environments
+
+---
+
+## For each environment, store:
+
+- environment ID
+- universe ID
+- train/test split
+- controller performance table
+- best controller label
+- environment feature vector
+
+---
+
+# 4. Define Environment Features
+
+## Minimum recommended feature set
+
+### Alpha quality features
+- mean cross-sectional IC
+- std of IC
+- mean rank IC
+- alpha dispersion across assets
+- average top-minus-bottom alpha spread
+
+### Risk / volatility features
+- average realized volatility
+- volatility of volatility
+- average cross-sectional dispersion
+- downside semivolatility
+
+### Regime features
+- average HMM bull probability
+- regime-switch frequency
+- regime entropy / uncertainty
+- fraction of days in risk-off macro state
+
+### Correlation / structure features
+- average pairwise correlation
+- first PCA eigenvalue share
+- effective rank of covariance
+- concentration of sector exposures
+
+### Market stress features
+- drawdown frequency
+- average drawdown depth
+- tail-loss frequency
+- fraction of days with return below threshold
+
+---
+
+## Important rule
+
+Keep features:
+- interpretable
+- low-dimensional
+- tied to your existing system
+
+Do **not** create a huge feature zoo.
+
+---
+
+# 5. Define the Target
+
+## Option A (recommended first): best-controller classification
+
+For each environment:
+
+\[
+y_e = \arg\max_{\pi \in \Pi} J(e,\pi)
+\]
+
+Where `J` can be:
+- Sharpe
+- Calmar
+- or composite score
+
+---
+
+## Option B: top-k / ranking prediction
+
+Predict:
+- top 1 controller
+- top 2 controllers
+- or full ranking
+
+This is stronger but should come after Option A works.
+
+---
+
+## Option C: regret regression
+
+Predict performance of each controller and choose the best predicted one.
+
+This is more complex and optional.
+
+---
+
+# 6. Choose the Meta-Model
+
+## Start with simple, interpretable models
+
+### Recommended order
+1. MLP nn
+1. multinomial logistic regression
+2. decision tree
+3. random forest
+# 14. Implementation Order
+
+## Phase 1 — Data assembly
+- [ ] run full controller suite on second universe
+- [ ] assemble environment-level dataset
+- [ ] compute best controller labels
+
+## Phase 2 — Environment features
+- [ ] compute alpha features
+- [ ] compute regime / volatility features
+- [ ] compute correlation / structure features
+- [ ] normalize and store environment vectors
+
+## Phase 3 — Baselines
+- [ ] random selector
+- [ ] always D+
+- [ ] always D
+- [ ] always A4
+- [ ] best-average controller baseline
+
+## Phase 4 — Meta-models
+- [ ] logistic regression
+- [ ] decision tree
+- [ ] optional random forest
+- [ ] optional small MLP
+
+## Phase 5 — Evaluation
+- [ ] top-1 accuracy
+- [ ] top-2 accuracy
+- [ ] average regret
+- [ ] compare to baselines
+- [ ] analyze feature importance
+
+## Phase 6 — Write-up
+- [ ] add RQ4
+- [ ] add formal environment/controller notation
+- [ ] add table + figure
+- [ ] discuss whether controller choice transfers
+
+---
