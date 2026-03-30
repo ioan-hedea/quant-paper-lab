@@ -21,6 +21,9 @@ from .config import (
     ExperimentConfig,
     PipelineConfig,
     RISK_FREE_RATE,
+    UniverseProfile,
+    get_universe_profile,
+    use_universe,
 )
 from .pipeline import run_full_pipeline
 from .plots import plot_rolling_windows, plot_reward_ablation
@@ -568,15 +571,6 @@ def build_control_comparison_suite(base_config: PipelineConfig) -> list[Pipeline
     ensemble_mean.enable_e2e_baseline = False
     configs.append(ensemble_mean)
 
-    # A5b: Ensemble (min)
-    ensemble_min = copy.deepcopy(base_config)
-    ensemble_min.experiment = copy.deepcopy(shared_experiment)
-    ensemble_min.experiment.label = 'A5_ensemble_min'
-    ensemble_min.experiment.control_method = 'ensemble_rules'
-    ensemble_min.control = ControlConfig(method='ensemble_rules', ensemble_mode='min')
-    ensemble_min.enable_e2e_baseline = False
-    configs.append(ensemble_min)
-
     # B1: LinUCB
     linucb = copy.deepcopy(base_config)
     linucb.experiment = copy.deepcopy(shared_experiment)
@@ -633,6 +627,15 @@ def build_control_comparison_suite(base_config: PipelineConfig) -> list[Pipeline
     )
     cvar_convex.enable_e2e_baseline = False
     configs.append(cvar_convex)
+
+    # H: Model-predictive control
+    mpc = copy.deepcopy(base_config)
+    mpc.experiment = copy.deepcopy(shared_experiment)
+    mpc.experiment.label = 'H_mpc'
+    mpc.experiment.control_method = 'mpc'
+    mpc.control = ControlConfig(method='mpc')
+    mpc.enable_e2e_baseline = False
+    configs.append(mpc)
 
     # E: Expert-gated council
     council = copy.deepcopy(base_config)
@@ -840,6 +843,7 @@ def _display_label(label: str) -> str:
         'C_supervised': 'C: Supervised',
         'D_cvar_robust': 'D: CVaR-Robust',
         'D_plus_convexity': 'D+: CVaR + Convexity',
+        'H_mpc': 'H: MPC',
         'E_council': 'E: Council',
         'E_plus_convexity': 'E+: Council + Convexity',
         'G_mlp_meta': 'G: MLP Meta',
@@ -920,13 +924,13 @@ def _build_control_comparison_summary(metrics: pd.DataFrame) -> pd.DataFrame:
         'A3_dd_delever',
         'A4_regime_rules',
         'A5_ensemble_mean',
-        'A5_ensemble_min',
         'B1_linucb',
         'B2_thompson',
         'B3_epsilon_greedy',
         'C_supervised',
         'D_cvar_robust',
         'D_plus_convexity',
+        'H_mpc',
         'E_council',
         'E_plus_convexity',
         'G_mlp_meta',
@@ -966,7 +970,9 @@ def _control_family(label: str) -> str:
         return 'supervised'
     if label.startswith('D'):
         return 'robust opt'
-    if label.startswith('E'):
+    if label.startswith('H'):
+        return 'predictive control'
+    if label.startswith('E') or label.startswith('G'):
         return 'meta control'
     if label.startswith('F'):
         return 'safe rl'
@@ -982,6 +988,7 @@ def _control_color(label: str) -> str:
         'bandits': '#f58518',
         'supervised': '#54a24b',
         'robust opt': '#e45756',
+        'predictive control': '#6f4e7c',
         'meta control': '#72b7b2',
         'safe rl': '#8c6d31',
         'rl': '#b279a2',
@@ -1353,8 +1360,10 @@ def _normalize_checkpoint_value(value: object) -> object:
 
 
 def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, object]:
-    control_cfg = control_cfg or {}
-    method = str(control_cfg.get('method', 'none'))
+    default_control_cfg = asdict(ControlConfig())
+    merged_cfg = dict(default_control_cfg)
+    merged_cfg.update(control_cfg or {})
+    method = str(merged_cfg.get('method', 'none'))
     canonical: dict[str, object] = {'method': method}
 
     method_fields = {
@@ -1443,14 +1452,30 @@ def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, objec
             'regime_neutral_fraction',
             'regime_bear_fraction',
         ),
+        'mpc': (
+            'mpc_objective_version',
+            'mpc_horizon',
+            'mpc_replan_every',
+            'mpc_discount',
+            'mpc_alpha_decay',
+            'mpc_stress_reversion',
+            'mpc_min_invested',
+            'mpc_max_stabilizer',
+            'mpc_risk_penalty',
+            'mpc_turnover_penalty',
+            'mpc_drawdown_penalty',
+            'mpc_stress_penalty',
+            'mpc_terminal_penalty',
+            'mpc_max_daily_change',
+        ),
         'q_learning': ('ql_alpha', 'ql_gamma', 'ql_epsilon'),
     }
 
     for field in method_fields.get(method, ()):
-        if field in control_cfg:
-            canonical[field] = _normalize_checkpoint_value(control_cfg[field])
+        if field in merged_cfg:
+            canonical[field] = _normalize_checkpoint_value(merged_cfg[field])
 
-    if bool(control_cfg.get('convexity_enabled', False)):
+    if bool(merged_cfg.get('convexity_enabled', False)):
         canonical['convexity_enabled'] = True
         for field in (
             'convexity_threshold',
@@ -1463,28 +1488,38 @@ def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, objec
             'convexity_mild_regime',
             'convexity_strong_regime',
         ):
-            if field in control_cfg:
-                canonical[field] = _normalize_checkpoint_value(control_cfg[field])
+            if field in merged_cfg:
+                canonical[field] = _normalize_checkpoint_value(merged_cfg[field])
     return canonical
 
 
 def _canonical_pipeline_config(config_payload: dict[str, object]) -> dict[str, object]:
+    default_payload = asdict(PipelineConfig())
     config_payload = config_payload or {}
-    experiment_cfg = dict(config_payload.get('experiment', {}) or {})
-    feature_cfg = dict(config_payload.get('feature_availability', {}) or {})
-    cost_cfg = dict(config_payload.get('cost_model', {}) or {})
-    optimizer_cfg = dict(config_payload.get('optimizer', {}) or {})
-    option_cfg = dict(config_payload.get('option_overlay', {}) or {})
-    control_cfg = dict(config_payload.get('control', {}) or {})
+    merged_payload = dict(default_payload)
+    for key, value in config_payload.items():
+        if isinstance(value, dict) and isinstance(merged_payload.get(key), dict):
+            nested = dict(merged_payload.get(key, {}))
+            nested.update(value)
+            merged_payload[key] = nested
+        else:
+            merged_payload[key] = value
+
+    experiment_cfg = dict(merged_payload.get('experiment', {}) or {})
+    feature_cfg = dict(merged_payload.get('feature_availability', {}) or {})
+    cost_cfg = dict(merged_payload.get('cost_model', {}) or {})
+    optimizer_cfg = dict(merged_payload.get('optimizer', {}) or {})
+    option_cfg = dict(merged_payload.get('option_overlay', {}) or {})
+    control_cfg = dict(merged_payload.get('control', {}) or {})
 
     canonical = {
-        'train_frac': _normalize_checkpoint_value(config_payload.get('train_frac')),
-        'rebalance_band': _normalize_checkpoint_value(config_payload.get('rebalance_band')),
-        'min_turnover': _normalize_checkpoint_value(config_payload.get('min_turnover')),
-        'portfolio_reward_mode': _normalize_checkpoint_value(config_payload.get('portfolio_reward_mode')),
-        'hedge_reward_mode': _normalize_checkpoint_value(config_payload.get('hedge_reward_mode')),
-        'e2e_reward_mode': _normalize_checkpoint_value(config_payload.get('e2e_reward_mode')),
-        'enable_e2e_baseline': _normalize_checkpoint_value(config_payload.get('enable_e2e_baseline')),
+        'train_frac': _normalize_checkpoint_value(merged_payload.get('train_frac')),
+        'rebalance_band': _normalize_checkpoint_value(merged_payload.get('rebalance_band')),
+        'min_turnover': _normalize_checkpoint_value(merged_payload.get('min_turnover')),
+        'portfolio_reward_mode': _normalize_checkpoint_value(merged_payload.get('portfolio_reward_mode')),
+        'hedge_reward_mode': _normalize_checkpoint_value(merged_payload.get('hedge_reward_mode')),
+        'e2e_reward_mode': _normalize_checkpoint_value(merged_payload.get('e2e_reward_mode')),
+        'enable_e2e_baseline': _normalize_checkpoint_value(merged_payload.get('enable_e2e_baseline')),
         'feature_availability': {
             'macro_lag_days': _normalize_checkpoint_value(feature_cfg.get('macro_lag_days')),
             'allow_static_sec_quality': _normalize_checkpoint_value(feature_cfg.get('allow_static_sec_quality')),
@@ -1542,6 +1577,44 @@ def _checkpoint_path(checkpoint_dir: Path, run_key: str) -> Path:
     return checkpoint_dir / f"{safe_name}.pkl"
 
 
+def _universe_checkpoint_dir(base_checkpoint_dir: Path, universe_id: str | None) -> Path:
+    if universe_id in (None, "", "A"):
+        return base_checkpoint_dir / "universe_A"
+    return base_checkpoint_dir / f"universe_{universe_id}"
+
+
+def _scope_universe_run_key(run_key: str, universe_id: str | None) -> str:
+    """Keep legacy Universe A cache keys stable while namespacing other universes."""
+    if universe_id in (None, "", "A"):
+        return run_key
+    return f"universe_{universe_id}_{run_key}"
+
+
+def _checkpoint_key_candidates(run_key: str, universe_id: str | None) -> list[str]:
+    """Return checkpoint-key aliases for backward-compatible cache reuse."""
+    scoped = _scope_universe_run_key(run_key, universe_id)
+    candidates: list[str] = []
+    for key in (scoped, run_key):
+        if key not in candidates:
+            candidates.append(key)
+    return candidates
+
+
+def _checkpoint_candidates(checkpoint_dir: Path, run_key: str, universe_id: str | None) -> list[tuple[str, Path]]:
+    candidates = [
+        (candidate_key, _checkpoint_path(checkpoint_dir, candidate_key))
+        for candidate_key in _checkpoint_key_candidates(run_key, universe_id)
+    ]
+    legacy_dir = checkpoint_dir.parent if checkpoint_dir.name.startswith("universe_") else checkpoint_dir
+    if legacy_dir != checkpoint_dir:
+        for candidate_key in _checkpoint_key_candidates(run_key, universe_id):
+            legacy_path = _checkpoint_path(legacy_dir, candidate_key)
+            pair = (candidate_key, legacy_path)
+            if pair not in candidates:
+                candidates.append(pair)
+    return candidates
+
+
 def _progress_path(checkpoint_dir: Path) -> Path:
     return checkpoint_dir / "research_progress.json"
 
@@ -1593,9 +1666,36 @@ def _checkpoint_metadata(
     })
 
 
+def _compatible_checkpoint_view(metadata: dict[str, object]) -> dict[str, object]:
+    prices = dict(metadata.get('prices', {}) or {})
+    volumes = dict(metadata.get('volumes', {}) or {})
+    returns = dict(metadata.get('returns', {}) or {})
+    macro = dict(metadata.get('macro', {}) or {})
+    sec_quality = dict(metadata.get('sec_quality', {}) or {})
+    return {
+        'suite': metadata.get('suite'),
+        'include_e2e': metadata.get('include_e2e'),
+        'config': metadata.get('config'),
+        'prices_columns': tuple(prices.get('columns', ()) or ()),
+        'volumes_columns': tuple(volumes.get('columns', ()) or ()),
+        'returns_columns': tuple(returns.get('columns', ()) or ()),
+        'macro_columns': tuple(macro.get('columns', ()) or ()),
+        'sec_quality_present': int(sec_quality.get('rows', 0) or 0) > 0,
+    }
+
+
+def _config_only_checkpoint_view(metadata: dict[str, object]) -> dict[str, object]:
+    return {
+        'suite': metadata.get('suite'),
+        'include_e2e': metadata.get('include_e2e'),
+        'config': metadata.get('config'),
+    }
+
+
 def _load_checkpoint_results(
     checkpoint_path: Path,
     expected_metadata: dict[str, object],
+    match_mode: str = 'strict',
 ) -> dict[str, object] | None:
     try:
         with checkpoint_path.open('rb') as handle:
@@ -1614,6 +1714,14 @@ def _load_checkpoint_results(
 
     payload_metadata = _canonical_checkpoint_metadata(dict(payload.get('metadata', {}) or {}))
     if payload_metadata != expected_metadata:
+        if match_mode == 'compatible':
+            if _compatible_checkpoint_view(payload_metadata) == _compatible_checkpoint_view(expected_metadata):
+                print(f"  Loading compatible checkpoint at {checkpoint_path}; data window or patch metadata changed.")
+                return payload['results']
+        elif match_mode == 'config_only':
+            if _config_only_checkpoint_view(payload_metadata) == _config_only_checkpoint_view(expected_metadata):
+                print(f"  Loading config-matched checkpoint at {checkpoint_path}; data signatures differ.")
+                return payload['results']
         print(f"  Ignoring mismatched checkpoint at {checkpoint_path}; recomputing.")
         return None
 
@@ -1673,6 +1781,8 @@ def run_research_evaluation(
     sec_quality_scores: pd.Series | None = None,
     base_config: PipelineConfig | None = None,
     evaluation_config: EvaluationConfig | None = None,
+    universe_id: str | None = None,
+    export_paper_tables: bool | None = None,
 ) -> dict[str, object]:
     """
     Run the ablation and robustness engine.
@@ -1685,14 +1795,21 @@ def run_research_evaluation(
     """
     base_config = copy.deepcopy(base_config or PipelineConfig())
     evaluation_config = evaluation_config or EvaluationConfig()
+    universe_id = universe_id or 'A'
+    if export_paper_tables is None:
+        export_paper_tables = universe_id == 'A'
     macro_data = macro_data if macro_data is not None else pd.DataFrame(index=returns.index)
     sec_quality_scores = sec_quality_scores if sec_quality_scores is not None else pd.Series(dtype=float)
-    checkpoint_dir = Path(evaluation_config.checkpoint_dir)
+    checkpoint_root = Path(evaluation_config.checkpoint_dir)
+    checkpoint_dir = _universe_checkpoint_dir(checkpoint_root, universe_id)
     run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_root = Path(evaluation_config.output_dir)
-    output_dir = output_root / run_timestamp if evaluation_config.timestamp_outputs else output_root
+    if evaluation_config.timestamp_outputs:
+        output_dir = output_root / f"{run_timestamp}_universe_{universe_id}"
+    else:
+        output_dir = output_root / f"universe_{universe_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Research outputs will be written to: {output_dir}")
+    print(f"Research outputs for Universe {universe_id} will be written to: {output_dir}")
     if evaluation_config.enable_checkpoints:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         print(f"Research checkpoints enabled: {checkpoint_dir}")
@@ -1760,25 +1877,15 @@ def run_research_evaluation(
             f"\nResearch run {run_counter}/{total_runs}: "
             f"{suite} [{run_config.experiment.label}]"
         )
-        checkpoint_path = _checkpoint_path(checkpoint_dir, run_key)
-        checkpoint_metadata = _checkpoint_metadata(
-            run_prices,
-            run_volumes,
-            run_returns,
-            run_macro,
-            sec_quality_scores,
-            run_config,
-            suite=suite,
-            include_e2e=include_e2e,
-            run_key=run_key,
-        )
+        scoped_run_key = _scope_universe_run_key(run_key, universe_id)
         current_run = {
             'ordinal': run_counter,
             'total_runs': total_runs,
             'suite': suite,
             'label': run_config.experiment.label,
-            'run_key': run_key,
+            'run_key': scoped_run_key,
             'include_e2e': include_e2e,
+            'universe_id': universe_id,
         }
         if evaluation_config.enable_checkpoints:
             _write_progress_manifest(
@@ -1789,18 +1896,40 @@ def run_research_evaluation(
                 current_run=current_run,
                 last_completed_run=last_completed_run,
             )
-        if evaluation_config.enable_checkpoints and checkpoint_path.exists():
-            cached_results = _load_checkpoint_results(checkpoint_path, checkpoint_metadata)
-            if cached_results is not None:
-                print(f"  Loading cached result from {checkpoint_path}")
+        checkpoint_candidates = _checkpoint_candidates(checkpoint_dir, run_key, universe_id)
+        active_checkpoint_key = scoped_run_key
+        active_checkpoint_path = _checkpoint_path(checkpoint_dir, active_checkpoint_key)
+        if evaluation_config.enable_checkpoints:
+            for candidate_key, candidate_path in checkpoint_candidates:
+                if not candidate_path.exists():
+                    continue
+                checkpoint_metadata = _checkpoint_metadata(
+                    run_prices,
+                    run_volumes,
+                    run_returns,
+                    run_macro,
+                    sec_quality_scores,
+                    run_config,
+                    suite=suite,
+                    include_e2e=include_e2e,
+                    run_key=candidate_key,
+                )
+                cached_results = _load_checkpoint_results(
+                    candidate_path,
+                    checkpoint_metadata,
+                    match_mode=evaluation_config.checkpoint_match_mode,
+                )
+                if cached_results is None:
+                    continue
+                print(f"  Loading cached result from {candidate_path}")
                 if include_e2e:
                     first_ppo_logs_shown = True
-                completed_run_keys.append(run_key)
+                completed_run_keys.append(candidate_key)
                 last_completed_run = {
                     **current_run,
                     'source': 'cache',
                     'completed_at': datetime.now().isoformat(),
-                    'checkpoint_path': str(checkpoint_path),
+                    'checkpoint_path': str(candidate_path),
                 }
                 _write_progress_manifest(
                     checkpoint_dir,
@@ -1827,23 +1956,34 @@ def run_research_evaluation(
             config=run_config,
         )
         if evaluation_config.enable_checkpoints:
+            checkpoint_metadata = _checkpoint_metadata(
+                run_prices,
+                run_volumes,
+                run_returns,
+                run_macro,
+                sec_quality_scores,
+                run_config,
+                suite=suite,
+                include_e2e=include_e2e,
+                run_key=active_checkpoint_key,
+            )
             checkpoint_payload = {
                 'schema_version': CHECKPOINT_SCHEMA_VERSION,
                 'saved_at': datetime.now().isoformat(),
                 'metadata': checkpoint_metadata,
                 'results': _sanitize_for_checkpoint(results),
             }
-            temp_checkpoint_path = checkpoint_path.with_suffix(f"{checkpoint_path.suffix}.tmp")
+            temp_checkpoint_path = active_checkpoint_path.with_suffix(f"{active_checkpoint_path.suffix}.tmp")
             with temp_checkpoint_path.open('wb') as handle:
                 pickle.dump(checkpoint_payload, handle)
-            temp_checkpoint_path.replace(checkpoint_path)
-            print(f"  Saved checkpoint to {checkpoint_path}")
-            completed_run_keys.append(run_key)
+            temp_checkpoint_path.replace(active_checkpoint_path)
+            print(f"  Saved checkpoint to {active_checkpoint_path}")
+            completed_run_keys.append(active_checkpoint_key)
             last_completed_run = {
                 **current_run,
                 'source': 'fresh',
                 'completed_at': datetime.now().isoformat(),
-                'checkpoint_path': str(checkpoint_path),
+                'checkpoint_path': str(active_checkpoint_path),
             }
             _write_progress_manifest(
                 checkpoint_dir,
@@ -2179,6 +2319,7 @@ def run_research_evaluation(
                     'C_supervised',
                     'D_cvar_robust',
                     'D_plus_convexity',
+                    'H_mpc',
                     'E_council',
                     'E_plus_convexity',
                     'G_mlp_meta',
@@ -2258,12 +2399,13 @@ def run_research_evaluation(
         bootstrap_significance.to_csv(output_dir / 'research_bootstrap_significance.csv', index=False)
     if not control_significance.empty:
         control_significance.to_csv(output_dir / 'research_control_significance.csv', index=False)
-    _write_research_tables(
-        ablation_summary,
-        robustness_summary,
-        output_path=Path('paper/2col/research_paper_tables.tex'),
-        bootstrap_significance=bootstrap_significance,
-    )
+    if export_paper_tables:
+        _write_research_tables(
+            ablation_summary,
+            robustness_summary,
+            output_path=Path('paper/2col/research_paper_tables.tex'),
+            bootstrap_significance=bootstrap_significance,
+        )
     _write_research_tables(
         ablation_summary,
         robustness_summary,
@@ -2286,6 +2428,7 @@ def run_research_evaluation(
     plot_reward_ablation(metrics, output_path=output_dir / 'pipeline_reward_ablation.png')
 
     summary = {
+        'universe_id': universe_id,
         'base_config': asdict(base_config),
         'evaluation_config': asdict(evaluation_config),
         'run_timestamp': run_timestamp,
@@ -2310,6 +2453,13 @@ def run_research_evaluation(
     with (output_dir / 'research_summary.json').open('w', encoding='utf-8') as handle:
         json.dump(summary, handle, indent=2)
 
+    try:
+        from scripts.generate_control_story_plots import generate_plot_set
+
+        generate_plot_set(output_dir)
+    except Exception as exc:
+        print(f"Story-plot generation failed for Universe {universe_id}: {exc}")
+
     if evaluation_config.enable_checkpoints:
         _write_progress_manifest(
             checkpoint_dir,
@@ -2331,4 +2481,411 @@ def run_research_evaluation(
         'control_significance': control_significance,
         'summary': summary,
         'output_dir': output_dir,
+    }
+
+
+# ============================================================
+# Meta-Learning / Controller-Selection Evaluation (RQ4)
+# ============================================================
+
+def _compute_environment_features_from_results(
+    results: dict,
+    universe_id: str,
+    train_frac: float,
+) -> dict[str, float]:
+    """Extract environment-level features from a completed pipeline run.
+
+    These features characterize the environment (universe + split) and
+    are used as inputs to the meta-learning controller selector.
+    """
+    rets = _daily_returns_from_path(results.get('wealth', [1.0]))
+    if len(rets) == 0:
+        return {}
+
+    beliefs = np.asarray(results.get('regime_beliefs', [0.5]), dtype=float)
+    vols = np.asarray(results.get('realized_vols', [0.15]), dtype=float)
+    alphas = np.asarray(results.get('alpha_strengths', [0.5]), dtype=float)
+
+    # Alpha quality
+    alpha_mean = float(alphas.mean()) if len(alphas) > 0 else 0.0
+    alpha_std = float(alphas.std()) if len(alphas) > 1 else 0.0
+
+    # Risk / volatility
+    vol_mean = float(vols.mean()) if len(vols) > 0 else 0.15
+    vol_of_vol = float(vols.std()) if len(vols) > 1 else 0.0
+
+    # Regime
+    regime_mean = float(beliefs.mean()) if len(beliefs) > 0 else 0.5
+    if len(beliefs) > 1:
+        regime_switch_freq = float(np.abs(np.diff((beliefs > 0.5).astype(float))).mean())
+    else:
+        regime_switch_freq = 0.0
+    regime_risk_off = float(np.mean(beliefs < 0.30)) if len(beliefs) > 0 else 0.0
+
+    # Market stress
+    wealth = np.asarray(results.get('wealth', [1.0]), dtype=float)
+    if len(wealth) > 1:
+        peak = np.maximum.accumulate(wealth)
+        dd = (wealth - peak) / (peak + 1e-8)
+        max_dd = float(dd.min())
+        dd_freq = float(np.mean(dd < -0.02))
+    else:
+        max_dd = 0.0
+        dd_freq = 0.0
+
+    ann_ret = float(np.mean(rets) * 252) if len(rets) > 0 else 0.0
+    ann_vol = float(np.std(rets) * np.sqrt(252)) if len(rets) > 0 else 0.15
+
+    return {
+        'universe_id': universe_id,
+        'train_frac': train_frac,
+        'alpha_mean': alpha_mean,
+        'alpha_std': alpha_std,
+        'vol_mean': vol_mean,
+        'vol_of_vol': vol_of_vol,
+        'regime_mean': regime_mean,
+        'regime_switch_freq': regime_switch_freq,
+        'regime_risk_off_frac': regime_risk_off,
+        'max_drawdown': max_dd,
+        'dd_frequency': dd_freq,
+        'ann_return': ann_ret,
+        'ann_vol': ann_vol,
+    }
+
+
+def _build_meta_learning_dataset(
+    all_results: list[dict],
+) -> pd.DataFrame:
+    """Assemble the environment × controller performance dataset.
+
+    Each row is one (environment, controller) pair with:
+      - environment features
+      - controller label
+      - performance metrics (sharpe, calmar, max_dd)
+    """
+    rows: list[dict] = []
+    for entry in all_results:
+        env_features = entry.get('env_features', {})
+        controller_label = entry.get('controller_label', '')
+        metrics = entry.get('metrics', {})
+
+        row = dict(env_features)
+        row['controller_label'] = controller_label
+        row.update({
+            'sharpe': metrics.get('sharpe', 0.0),
+            'calmar': metrics.get('calmar', 0.0),
+            'max_drawdown': metrics.get('max_drawdown', 0.0),
+            'ann_return': metrics.get('ann_return', 0.0),
+        })
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def evaluate_controller_transfer(
+    meta_dataset: pd.DataFrame,
+    score_col: str = 'sharpe',
+) -> dict[str, object]:
+    """Evaluate whether controller rankings transfer across environments.
+
+    For each environment, identifies the best controller by ``score_col``,
+    then measures:
+      - Rank correlation (Kendall's tau) of controller rankings across envs
+      - Top-1 and top-2 accuracy of simple meta-predictors
+      - Average regret vs. oracle selection
+
+    Returns a summary dict suitable for inclusion in the paper results.
+    """
+    if meta_dataset.empty:
+        return {'error': 'empty dataset'}
+
+    feature_cols = [
+        c for c in meta_dataset.columns
+        if c not in ('controller_label', 'sharpe', 'calmar', 'max_drawdown',
+                      'ann_return', 'universe_id', 'train_frac')
+    ]
+
+    # Build pivot: rows = environments, columns = controllers, values = score
+    env_keys = ['universe_id', 'train_frac']
+    available_keys = [k for k in env_keys if k in meta_dataset.columns]
+    if not available_keys:
+        return {'error': 'no environment keys found'}
+
+    meta_dataset['env_id'] = meta_dataset[available_keys].astype(str).agg('_'.join, axis=1)
+    pivot = meta_dataset.pivot_table(
+        index='env_id', columns='controller_label', values=score_col, aggfunc='first',
+    ).dropna(axis=1, how='all')
+
+    if pivot.shape[0] < 2 or pivot.shape[1] < 2:
+        return {'error': f'insufficient data: {pivot.shape[0]} envs, {pivot.shape[1]} controllers'}
+
+    # Best controller per environment
+    best_per_env = pivot.idxmax(axis=1)
+    best_score_per_env = pivot.max(axis=1)
+
+    # Baseline: always pick the best-on-average controller
+    avg_score = pivot.mean(axis=0)
+    best_avg_controller = avg_score.idxmax()
+
+    # Rank correlation across environments
+    rankings = pivot.rank(axis=1, ascending=False)
+    tau_values: list[float] = []
+    envs = list(pivot.index)
+    for i in range(len(envs)):
+        for j in range(i + 1, len(envs)):
+            shared_cols = pivot.columns[pivot.loc[envs[i]].notna() & pivot.loc[envs[j]].notna()]
+            if len(shared_cols) >= 3:
+                tau, _ = sp_stats.kendalltau(
+                    rankings.loc[envs[i], shared_cols],
+                    rankings.loc[envs[j], shared_cols],
+                )
+                if not np.isnan(tau):
+                    tau_values.append(float(tau))
+
+    mean_tau = float(np.mean(tau_values)) if tau_values else float('nan')
+
+    # Top-1 / top-2 accuracy of baselines
+    n_envs = len(envs)
+    # Always-best-average
+    top1_avg = float(np.mean(best_per_env == best_avg_controller))
+    top2_per_env = pivot.apply(lambda row: row.nlargest(2).index.tolist(), axis=1)
+    top2_avg = float(np.mean([best_avg_controller in t2 for t2 in top2_per_env]))
+
+    # Average regret: difference between oracle and best-average strategy
+    regret_values: list[float] = []
+    for env_id in envs:
+        oracle_score = float(best_score_per_env[env_id])
+        baseline_score = float(pivot.loc[env_id, best_avg_controller]) if best_avg_controller in pivot.columns else 0.0
+        regret_values.append(oracle_score - baseline_score)
+    avg_regret = float(np.mean(regret_values))
+
+    # Random baseline
+    n_controllers = pivot.shape[1]
+    random_top1 = 1.0 / max(1, n_controllers)
+    random_top2 = min(1.0, 2.0 / max(1, n_controllers))
+
+    return {
+        'n_environments': n_envs,
+        'n_controllers': n_controllers,
+        'best_avg_controller': best_avg_controller,
+        'mean_rank_correlation_tau': mean_tau,
+        'best_per_env': best_per_env.to_dict(),
+        'top1_accuracy_best_avg': top1_avg,
+        'top2_accuracy_best_avg': top2_avg,
+        'top1_accuracy_random': random_top1,
+        'top2_accuracy_random': random_top2,
+        'avg_regret_best_avg': avg_regret,
+        'avg_score_by_controller': avg_score.to_dict(),
+        'controller_rankings_pivot': pivot.to_dict(),
+    }
+
+
+# ============================================================
+# Cross-Universe Evaluation Runner
+# ============================================================
+
+def run_cross_universe_evaluation(
+    universe_ids: tuple[str, ...] | None = None,
+    base_config: PipelineConfig | None = None,
+    evaluation_config: EvaluationConfig | None = None,
+) -> dict[str, object]:
+    """Run the full controller suite on multiple universes and evaluate transfer.
+
+    For each universe in ``universe_ids``:
+      1. Swap the active universe via ``use_universe()``
+      2. Load market data for that universe
+      3. Run every controller across the configured train_fracs
+      4. Collect per-environment features and per-controller performance
+
+    Then assemble the meta-learning dataset and evaluate whether controller
+    rankings transfer across universes (Kendall's tau, regret, top-k accuracy).
+
+    Returns a dict with the meta-learning dataset, transfer results, and
+    per-universe raw results.
+    """
+    from .data import load_market_data
+
+    if base_config is None:
+        base_config = PipelineConfig()
+    if evaluation_config is None:
+        evaluation_config = EvaluationConfig()
+    if universe_ids is None:
+        universe_ids = evaluation_config.meta_learning_universes
+
+    control_suite = build_control_comparison_suite(base_config)
+    checkpoint_root = Path(evaluation_config.checkpoint_dir)
+    if evaluation_config.enable_checkpoints:
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+
+    all_meta_rows: list[dict] = []
+    per_universe_results: dict[str, list[dict]] = {}
+
+    for uid in universe_ids:
+        print(f"\n{'='*60}")
+        print(f"CROSS-UNIVERSE EVALUATION: Universe {uid}")
+        print(f"{'='*60}")
+
+        with use_universe(uid) as profile:
+            checkpoint_dir = _universe_checkpoint_dir(checkpoint_root, uid)
+            if evaluation_config.enable_checkpoints:
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            print(f"  Tickers: {len(profile.tickers)}")
+            print(f"  Pairs: {len(profile.pairs)}")
+
+            # Load data for this universe
+            prices, volumes, returns, macro_data, sec_quality = load_market_data(universe_id=uid)
+
+            universe_runs: list[dict] = []
+
+            for ctrl_config in control_suite:
+                ctrl_label = ctrl_config.experiment.label
+
+                for train_frac in _control_train_fracs(ctrl_config, evaluation_config):
+                    run_config = copy.deepcopy(ctrl_config)
+                    run_config.train_frac = train_frac
+
+                    run_label = f"{uid}_{ctrl_label}_tf{train_frac:.2f}"
+                    print(f"  Running {run_label} ...")
+
+                    try:
+                        base_run_key = f"control_{ctrl_label}_tf{train_frac:.2f}"
+                        active_checkpoint_key = _scope_universe_run_key(base_run_key, uid)
+                        active_checkpoint_path = _checkpoint_path(checkpoint_dir, active_checkpoint_key)
+                        results = None
+                        if evaluation_config.enable_checkpoints:
+                            for candidate_key, candidate_path in _checkpoint_candidates(checkpoint_dir, base_run_key, uid):
+                                if not candidate_path.exists():
+                                    continue
+                                checkpoint_metadata = _checkpoint_metadata(
+                                    prices,
+                                    volumes,
+                                    returns,
+                                    macro_data,
+                                    sec_quality,
+                                    run_config,
+                                    suite='control_comparison',
+                                    include_e2e=False,
+                                    run_key=candidate_key,
+                                )
+                                results = _load_checkpoint_results(
+                                    candidate_path,
+                                    checkpoint_metadata,
+                                    match_mode=evaluation_config.checkpoint_match_mode,
+                                )
+                                if results is not None:
+                                    print(f"    Loaded cached result from {candidate_path}")
+                                    break
+
+                        if results is None:
+                            results = run_full_pipeline(
+                                prices, volumes, returns,
+                                macro_data=macro_data,
+                                sec_quality_scores=sec_quality,
+                                config=run_config,
+                            )
+                            if evaluation_config.enable_checkpoints:
+                                checkpoint_metadata = _checkpoint_metadata(
+                                    prices,
+                                    volumes,
+                                    returns,
+                                    macro_data,
+                                    sec_quality,
+                                    run_config,
+                                    suite='control_comparison',
+                                    include_e2e=False,
+                                    run_key=active_checkpoint_key,
+                                )
+                                checkpoint_payload = {
+                                    'schema_version': CHECKPOINT_SCHEMA_VERSION,
+                                    'saved_at': datetime.now().isoformat(),
+                                    'metadata': checkpoint_metadata,
+                                    'results': _sanitize_for_checkpoint(results),
+                                }
+                                temp_checkpoint_path = active_checkpoint_path.with_suffix(f"{active_checkpoint_path.suffix}.tmp")
+                                with temp_checkpoint_path.open('wb') as handle:
+                                    pickle.dump(checkpoint_payload, handle)
+                                temp_checkpoint_path.replace(active_checkpoint_path)
+                                print(f"    Saved checkpoint to {active_checkpoint_path}")
+
+                        # Extract metrics
+                        metrics = _path_metric_summary(
+                            results.get('wealth', [1.0]),
+                            run_label,
+                        )
+
+                        # Extract environment features
+                        env_features = _compute_environment_features_from_results(
+                            results, uid, train_frac,
+                        )
+
+                        meta_row = {
+                            'env_features': env_features,
+                            'controller_label': ctrl_label,
+                            'metrics': metrics,
+                        }
+                        all_meta_rows.append(meta_row)
+
+                        universe_runs.append({
+                            'label': run_label,
+                            'controller': ctrl_label,
+                            'train_frac': train_frac,
+                            'metrics': metrics,
+                            'env_features': env_features,
+                        })
+
+                    except Exception as e:
+                        print(f"    FAILED: {e}")
+                        continue
+
+            per_universe_results[uid] = universe_runs
+
+    # Assemble the meta-learning dataset
+    meta_dataset = _build_meta_learning_dataset(all_meta_rows)
+
+    # Evaluate transfer
+    transfer_results = {}
+    for score in ('sharpe', 'calmar'):
+        transfer_results[score] = evaluate_controller_transfer(
+            meta_dataset, score_col=score,
+        )
+
+    # Save outputs
+    output_dir = Path(evaluation_config.output_dir)
+    if evaluation_config.timestamp_outputs:
+        universe_slug = "-".join(universe_ids)
+        output_dir = output_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_transfer_{universe_slug}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    meta_dataset.to_csv(output_dir / 'meta_learning_dataset.csv', index=False)
+
+    transfer_summary = {
+        'universe_ids': list(universe_ids),
+        'n_environments': int(
+            meta_dataset[['universe_id', 'train_frac']].drop_duplicates().shape[0]
+        ) if not meta_dataset.empty else 0,
+        'transfer_sharpe': transfer_results.get('sharpe', {}),
+        'transfer_calmar': transfer_results.get('calmar', {}),
+    }
+    with open(output_dir / 'meta_learning_transfer.json', 'w') as f:
+        json.dump(transfer_summary, f, indent=2, default=str)
+
+    print(f"\n{'='*60}")
+    print("CROSS-UNIVERSE EVALUATION COMPLETE")
+    print(f"{'='*60}")
+    print(f"  Universes: {list(universe_ids)}")
+    print(f"  Meta-dataset rows: {len(meta_dataset)}")
+    if 'sharpe' in transfer_results:
+        tr = transfer_results['sharpe']
+        if 'error' not in tr:
+            print(f"  Mean rank correlation (tau): {tr['mean_rank_correlation_tau']:.3f}")
+            print(f"  Best-avg controller: {tr['best_avg_controller']}")
+            print(f"  Top-1 accuracy (best-avg): {tr['top1_accuracy_best_avg']:.2f}")
+            print(f"  Avg regret vs oracle: {tr['avg_regret_best_avg']:.4f}")
+    print(f"  Output: {output_dir}")
+
+    return {
+        'meta_dataset': meta_dataset,
+        'transfer_results': transfer_results,
+        'per_universe_results': per_universe_results,
+        'output_dir': str(output_dir),
     }

@@ -32,6 +32,7 @@ DISPLAY_LABELS = {
     "C_supervised": "C Supervised",
     "D_cvar_robust": "D CVaR robust",
     "D_plus_convexity": "D+ Convexity",
+    "H_mpc": "H MPC",
     "E_council": "E Council",
     "E_plus_convexity": "E+ Council + convexity",
     "G_mlp_meta": "G MLP meta",
@@ -52,6 +53,7 @@ FAMILY_LABELS = {
     "bandit": "Bandit",
     "supervised": "Supervised",
     "robust": "Robust",
+    "predictive": "Predictive control",
     "meta": "Meta-control",
     "safe_rl": "Safe RL",
     "rl": "RL",
@@ -65,6 +67,7 @@ FAMILY_COLORS = {
     "bandit": "#457B9D",
     "supervised": "#E9C46A",
     "robust": "#D1495B",
+    "predictive": "#6F4E7C",
     "meta": "#3B8EA5",
     "safe_rl": "#8C6D31",
     "rl": "#7B2CBF",
@@ -88,6 +91,7 @@ SELECTED_METHODS = [
     "B1_linucb",
     "D_cvar_robust",
     "D_plus_convexity",
+    "H_mpc",
     "E_council",
     "G_mlp_meta",
     "F_cmdp_lagrangian",
@@ -110,6 +114,8 @@ def family_of(label: str) -> str:
         return "supervised"
     if label.startswith("D"):
         return "robust"
+    if label.startswith("H"):
+        return "predictive"
     if label.startswith("E") or label.startswith("G"):
         return "meta"
     if label.startswith("F"):
@@ -123,7 +129,9 @@ def pct(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
-def resolve_results_dir() -> Path:
+def resolve_results_dir(results_dir: Path | None = None) -> Path:
+    if results_dir is not None:
+        return Path(results_dir)
     results_root = ROOT / "results"
     candidates = sorted(
         [path for path in results_root.iterdir() if path.is_dir() and (path / "research_summary.json").exists()],
@@ -134,8 +142,8 @@ def resolve_results_dir() -> Path:
     return ROOT
 
 
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    results_dir = resolve_results_dir()
+def load_data(results_dir: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+    results_dir = resolve_results_dir(results_dir)
     control = pd.read_csv(results_dir / "research_control_comparison.csv")
     ablation = pd.read_csv(results_dir / "research_ablation_summary.csv")
     metrics = pd.read_csv(results_dir / "research_metrics.csv")
@@ -159,7 +167,7 @@ def add_family_legend(ax) -> None:
     handles = [
         Line2D([0], [0], marker="o", color="none", markerfacecolor=FAMILY_COLORS[key],
                markeredgecolor="black", markersize=8, label=FAMILY_LABELS[key])
-        for key in ["baseline", "rule", "bandit", "supervised", "robust", "meta", "safe_rl", "rl"]
+        for key in ["baseline", "rule", "bandit", "supervised", "robust", "predictive", "meta", "safe_rl", "rl"]
     ]
     ax.legend(handles=handles, loc="best", frameon=True, fontsize=9)
 
@@ -330,6 +338,7 @@ def plot_control_overview(
         ("Best bandit", control["component_label"].str.startswith("B")),
         ("Supervised", control["component_label"] == "C_supervised"),
         ("Robust", control["component_label"].str.startswith("D")),
+        ("Predictive", control["component_label"].str.startswith("H")),
         (
             "Meta-control",
             control["component_label"].str.startswith("E")
@@ -563,25 +572,41 @@ def plot_control_pareto(control: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
-def _load_checkpoint_results(label: str) -> dict | None:
-    path = ROOT / "checkpoints" / "research_runs" / f"{label}.pkl"
-    if not path.exists():
-        return None
-    with path.open("rb") as f:
-        obj = pickle.load(f)
-    return obj.get("results", obj)
+def _checkpoint_label(label: str, universe_id: str) -> str:
+    if universe_id in {"", "A"}:
+        return label
+    return f"universe_{universe_id}_{label}"
 
 
-def plot_interpretability(out_path: Path) -> None:
-    meta = _load_checkpoint_results("control_G_mlp_meta_tf0.50")
+def _load_checkpoint_results(label: str, universe_id: str = "A") -> dict | None:
+    scoped_label = _checkpoint_label(label, universe_id)
+    checkpoint_root = ROOT / "checkpoints" / "research_runs"
+    universe_dir = checkpoint_root / ("universe_A" if universe_id in {"", "A"} else f"universe_{universe_id}")
+    candidates = [
+        universe_dir / f"{scoped_label}.pkl",
+        universe_dir / f"{label}.pkl",
+        checkpoint_root / f"{scoped_label}.pkl",
+        checkpoint_root / f"{label}.pkl",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        with path.open("rb") as f:
+            obj = pickle.load(f)
+        return obj.get("results", obj)
+    return None
+
+
+def plot_interpretability(out_path: Path, universe_id: str = "A") -> None:
+    meta = _load_checkpoint_results("control_G_mlp_meta_tf0.50", universe_id=universe_id)
     meta_prefix = "mlp_meta"
-    meta_title = "MLP Meta Weights Over Time (G, tf=0.50)"
+    meta_title = f"MLP Meta Weights Over Time (G, tf=0.50, Universe {universe_id})"
     meta_note = "Mean weights:\nCVaR {cvar:.2f}\nRules {rules:.2f}\nLinUCB {linucb:.2f}"
     if meta is None:
-        meta = _load_checkpoint_results("control_E_council_tf0.50")
+        meta = _load_checkpoint_results("control_E_council_tf0.50", universe_id=universe_id)
         meta_prefix = "council"
-        meta_title = "Council Weights Over Time (E, tf=0.50)"
-    convex = _load_checkpoint_results("control_D_plus_convexity_tf0.50")
+        meta_title = f"Council Weights Over Time (E, tf=0.50, Universe {universe_id})"
+    convex = _load_checkpoint_results("control_D_plus_convexity_tf0.50", universe_id=universe_id)
     if meta is None or convex is None:
         print("plot_interpretability: missing cached checkpoints; skipping.")
         return
@@ -676,7 +701,7 @@ def plot_interpretability(out_path: Path) -> None:
                 shares.append(float(np.mean(modes[mask] == mode)))
         ax.bar(regime_names, shares, bottom=bottoms, color=mode_colors[mode], label=mode.title(), alpha=0.92)
         bottoms += np.asarray(shares)
-    ax.set_title("Convexity Mode Usage by Regime (D+, tf=0.50)", fontweight="bold")
+    ax.set_title(f"Convexity Mode Usage by Regime (D+, tf=0.50, Universe {universe_id})", fontweight="bold")
     ax.set_ylabel("Share of days")
     ax.set_ylim(0, 1.0)
     ax.legend(loc="upper left", fontsize=9, frameon=True)
@@ -696,10 +721,10 @@ def plot_interpretability(out_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_tail_diagnostic(out_path: Path) -> None:
-    factor = _load_checkpoint_results("control_factor_only_tf0.50")
-    cvar = _load_checkpoint_results("control_D_cvar_robust_tf0.50")
-    convex = _load_checkpoint_results("control_D_plus_convexity_tf0.50")
+def plot_tail_diagnostic(out_path: Path, universe_id: str = "A") -> None:
+    factor = _load_checkpoint_results("control_factor_only_tf0.50", universe_id=universe_id)
+    cvar = _load_checkpoint_results("control_D_cvar_robust_tf0.50", universe_id=universe_id)
+    convex = _load_checkpoint_results("control_D_plus_convexity_tf0.50", universe_id=universe_id)
     if factor is None or cvar is None or convex is None:
         print("plot_tail_diagnostic: missing cached checkpoints; skipping.")
         return
@@ -745,7 +770,10 @@ def plot_tail_diagnostic(out_path: Path) -> None:
         label=f"D+ vs D  VaR5 {d_var_bps:+.1f} bps  CVaR5 {d_cvar_bps:+.1f} bps",
     )
 
-    ax.set_title("Left-Tail Distribution Diagnostic (Reference Split tf=0.50)", fontweight="bold")
+    ax.set_title(
+        f"Left-Tail Distribution Diagnostic (Reference Split tf=0.50, Universe {universe_id})",
+        fontweight="bold",
+    )
     ax.set_xlabel("Daily return threshold")
     ax.set_ylabel("Empirical probability of return below threshold")
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.1f}%"))
@@ -773,8 +801,143 @@ def plot_tail_diagnostic(out_path: Path) -> None:
     plt.close(fig)
 
 
-def main() -> None:
-    control, ablation, detail, summary = load_data()
+def plot_mpc_diagnostic(out_path: Path, universe_id: str = "A") -> None:
+    mpc = _load_checkpoint_results("control_H_mpc_tf0.50", universe_id=universe_id)
+    if mpc is None:
+        print("plot_mpc_diagnostic: missing cached checkpoint; skipping.")
+        return
+
+    dates = pd.to_datetime(mpc.get("dates", []))
+    invested_actual = np.asarray(mpc.get("invested_fractions", []), dtype=float)
+    invested_target = np.asarray(mpc.get("mpc_invested_targets", []), dtype=float)
+    stabilizer_mix = np.asarray(mpc.get("mpc_stabilizer_mixes", []), dtype=float)
+    drawdowns = -np.asarray(mpc.get("drawdowns", []), dtype=float)
+    regime_beliefs = np.asarray(mpc.get("regime_beliefs", []), dtype=float)
+    plan_sources = np.asarray(mpc.get("mpc_plan_sources", []), dtype=object)
+    plan_steps = np.asarray(mpc.get("mpc_plan_steps", []), dtype=int)
+    plan_objectives = np.asarray(mpc.get("mpc_plan_objectives", []), dtype=float)
+
+    n_obs = min(
+        len(dates),
+        len(invested_actual),
+        len(invested_target),
+        len(stabilizer_mix),
+        len(drawdowns),
+        len(regime_beliefs),
+        len(plan_sources),
+        len(plan_steps),
+        len(plan_objectives),
+    )
+    if n_obs == 0:
+        print("plot_mpc_diagnostic: empty checkpoint arrays; skipping.")
+        return
+
+    dates = dates[:n_obs]
+    invested_actual = invested_actual[:n_obs]
+    invested_target = invested_target[:n_obs]
+    stabilizer_mix = stabilizer_mix[:n_obs]
+    drawdowns = drawdowns[:n_obs]
+    regime_beliefs = regime_beliefs[:n_obs]
+    plan_sources = plan_sources[:n_obs]
+    plan_steps = plan_steps[:n_obs]
+    plan_objectives = plan_objectives[:n_obs]
+
+    replans = np.r_[True, np.diff(plan_steps) < 0]
+    mean_target = float(np.nanmean(invested_target))
+    mean_actual = float(np.nanmean(invested_actual))
+    mean_stabilizer = float(np.nanmean(stabilizer_mix))
+    stabilizer_stress_corr = float(np.corrcoef(stabilizer_mix, drawdowns)[0, 1]) if n_obs > 1 else np.nan
+    invested_regime_corr = float(np.corrcoef(invested_target, regime_beliefs)[0, 1]) if n_obs > 1 else np.nan
+    source_counts = pd.Series(plan_sources).value_counts(normalize=True)
+    source_text = "\n".join(
+        f"{name}: {share:.0%}" for name, share in source_counts.head(3).items()
+    ) if not source_counts.empty else "n/a"
+
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, axes = plt.subplots(2, 1, figsize=(15.5, 9.0), sharex=True)
+    fig.suptitle(
+        f"MPC Diagnostic: Planned Exposure and Stabilizer Usage (H, tf=0.50, Universe {universe_id})",
+        fontsize=17,
+        fontweight="bold",
+    )
+
+    stress_windows = [
+        (pd.Timestamp("2020-02-19"), pd.Timestamp("2020-04-30"), "2020 crash"),
+        (pd.Timestamp("2022-01-01"), pd.Timestamp("2022-12-31"), "2022 bear"),
+    ]
+
+    ax = axes[0]
+    for start, end, label in stress_windows:
+        ax.axvspan(start, end, color="#BDBDBD", alpha=0.12, linewidth=0)
+        ax.text(
+            start + (end - start) / 2,
+            0.96,
+            label,
+            transform=ax.get_xaxis_transform(),
+            ha="center",
+            va="top",
+            fontsize=8.5,
+            color="#555555",
+            fontweight="bold",
+        )
+    ax.plot(dates, invested_target, color="#6F4E7C", linewidth=2.1, label="MPC invested target")
+    ax.plot(dates, invested_actual, color="#1D3557", linewidth=1.4, alpha=0.85, label="Realized invested fraction")
+    replan_dates = dates[replans]
+    replan_targets = invested_target[replans]
+    ax.scatter(replan_dates, replan_targets, s=14, color="#C77DFF", alpha=0.7, zorder=3, label="Replan step")
+    ax.set_ylabel("Invested fraction")
+    ax.set_ylim(0.2, 1.02)
+    ax.set_title("Receding-Horizon Exposure Path", fontweight="bold")
+    ax.legend(loc="upper left", ncol=3, fontsize=9, frameon=True)
+    ax.text(
+        0.98,
+        0.04,
+        f"Mean target {mean_target:.2f}\nMean realized {mean_actual:.2f}\n"
+        f"Target/regime corr {invested_regime_corr:.2f}\nTop plan sources:\n{source_text}",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=9,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.88, edgecolor="0.75"),
+    )
+
+    ax = axes[1]
+    for start, end, _ in stress_windows:
+        ax.axvspan(start, end, color="#BDBDBD", alpha=0.12, linewidth=0)
+    ax.plot(dates, stabilizer_mix, color="#2A9D8F", linewidth=2.0, label="Stabilizer mix")
+    ax.fill_between(dates, 0.0, stabilizer_mix, color="#2A9D8F", alpha=0.18)
+    ax.set_ylabel("Stabilizer mix")
+    ax.set_ylim(0.0, max(0.5, float(np.nanmax(stabilizer_mix)) + 0.05))
+    ax.set_title("Stabilizer Usage and Stress", fontweight="bold")
+    ax2 = ax.twinx()
+    ax2.plot(dates, drawdowns, color="#D1495B", linewidth=1.6, alpha=0.85, label="Absolute drawdown")
+    ax2.plot(dates, 1.0 - regime_beliefs, color="#6C757D", linewidth=1.2, alpha=0.7, linestyle="--", label="Risk-off belief")
+    ax2.set_ylabel("Stress proxy")
+    ax2.set_ylim(0.0, max(0.35, float(np.nanmax(np.r_[drawdowns, 1.0 - regime_beliefs])) + 0.03))
+    lines_1, labels_1 = ax.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left", ncol=3, fontsize=9, frameon=True)
+    ax.text(
+        0.98,
+        0.04,
+        f"Mean stabilizer mix {mean_stabilizer:.2f}\nMix/drawdown corr {stabilizer_stress_corr:.2f}\n"
+        f"Mean plan objective {float(np.nanmean(plan_objectives)):.3f}",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=9,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.88, edgecolor="0.75"),
+    )
+    ax.set_xlabel("Date")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(out_path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
+def generate_plot_set(results_dir: Path | None = None) -> dict[str, Path]:
+    control, ablation, detail, summary = load_data(results_dir)
+    universe_id = str(summary.get("universe_id", "A"))
 
     outputs = {
         "control_overview": Path(summary["results_dir"]) / "control_method_overview.png",
@@ -783,14 +946,22 @@ def main() -> None:
         "legacy_pruning": Path(summary["results_dir"]) / "legacy_pruning_story.png",
         "interpretability": Path(summary["results_dir"]) / "control_interpretability.png",
         "tail_diagnostic": Path(summary["results_dir"]) / "control_tail_diagnostic.png",
+        "mpc_diagnostic": Path(summary["results_dir"]) / "control_mpc_diagnostic.png",
     }
 
     plot_control_overview(control, detail, summary, outputs["control_overview"])
     plot_control_heatmaps(control, detail, outputs["control_heatmaps"])
     plot_control_pareto(control, outputs["control_pareto"])
     plot_legacy_pruning(ablation, outputs["legacy_pruning"])
-    plot_interpretability(outputs["interpretability"])
-    plot_tail_diagnostic(outputs["tail_diagnostic"])
+    plot_interpretability(outputs["interpretability"], universe_id=universe_id)
+    plot_tail_diagnostic(outputs["tail_diagnostic"], universe_id=universe_id)
+    plot_mpc_diagnostic(outputs["mpc_diagnostic"], universe_id=universe_id)
+
+    return outputs
+
+
+def main() -> None:
+    outputs = generate_plot_set()
 
     print("Saved plot set:")
     for path in outputs.values():

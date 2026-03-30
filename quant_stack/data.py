@@ -43,10 +43,15 @@ def _sanitize_ohlcv_download(
     return prices.loc[common_idx], volumes.loc[common_idx], returns.loc[common_idx], dropped_tickers
 
 
-def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series]:
-    """Download OHLCV for the full universe + benchmark."""
+def load_market_data(
+    universe_id: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series]:
+    """Download OHLCV for the active universe plus the benchmark."""
     print("=" * 60)
-    print("STAGE 1: Loading Market Data")
+    if universe_id:
+        print(f"STAGE 1: Loading Market Data (Universe {universe_id})")
+    else:
+        print("STAGE 1: Loading Market Data")
     print("=" * 60)
     all_tickers = list(set(UNIVERSE + [BENCHMARK]))
     data = yf.download(all_tickers, period=DATA_PERIOD, auto_adjust=True)

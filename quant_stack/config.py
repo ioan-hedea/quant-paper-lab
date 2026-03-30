@@ -1,6 +1,7 @@
 """Configuration constants for the quant trading pipeline."""
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 # ============================================================
@@ -43,6 +44,75 @@ UNIVERSE_EXPANDED = list(dict.fromkeys([
     # Cross-asset diversifiers (3)
     'GLD', 'TLT', 'VNQ',
 ]))
+
+# ---- Second universe (B) for cross-universe validation ----
+# Deliberately minimal overlap with UNIVERSE_EXPANDED to test
+# whether controller rankings transfer to a different stock set.
+# Tilts: mid-cap growth, biotech, REITs, commodity-linked, small-cap value.
+UNIVERSE_B = list(dict.fromkeys([
+    # Technology — mid-cap / different names
+    'CRM', 'ADBE', 'NOW', 'PANW', 'SNPS', 'CDNS', 'MRVL', 'FTNT',
+    # Biotech / Pharma — higher-vol healthcare
+    'GILD', 'REGN', 'VRTX', 'ISRG', 'DXCM', 'IDXX', 'ZTS', 'MRNA',
+    # Financials — insurance + regional / fintech
+    'AIG', 'TRV', 'MET', 'ALL', 'BK', 'SCHW', 'ICE', 'CME',
+    # Consumer — different mix
+    'TGT', 'ROST', 'ORLY', 'AZO', 'DG', 'DLTR', 'YUM', 'CMG',
+    # Industrials — mid-cap, transport, aerospace
+    'FDX', 'NSC', 'CSX', 'WM', 'RSG', 'ITW', 'EMR', 'ROK',
+    # Energy — midstream + services
+    'WMB', 'KMI', 'OKE', 'ET', 'HAL', 'BKR', 'DVN', 'FANG',
+    # Materials / Mining
+    'NEM', 'GOLD', 'NUE', 'STLD', 'CF', 'MOS', 'ALB', 'ECL',
+    # REITs — broader than EXPANDED
+    'EQIX', 'DLR', 'SPG', 'WELL', 'AVB', 'EQR', 'VICI', 'IRM',
+    # Utilities — different names
+    'AEP', 'D', 'SRE', 'ED', 'WEC', 'ES', 'EXC', 'PCG',
+    # Cross-asset diversifiers
+    'SLV', 'IEF', 'HYG',
+]))
+
+PAIRS_CANDIDATES_B = [
+    # Tech
+    ('CRM', 'NOW'), ('ADBE', 'CRM'), ('PANW', 'FTNT'), ('SNPS', 'CDNS'),
+    # Biotech
+    ('GILD', 'REGN'), ('VRTX', 'MRNA'), ('ISRG', 'IDXX'),
+    # Financials
+    ('AIG', 'MET'), ('TRV', 'ALL'), ('ICE', 'CME'), ('BK', 'SCHW'),
+    # Consumer
+    ('TGT', 'ROST'), ('ORLY', 'AZO'), ('DG', 'DLTR'), ('YUM', 'CMG'),
+    # Industrials
+    ('FDX', 'NSC'), ('CSX', 'NSC'), ('WM', 'RSG'), ('ITW', 'EMR'),
+    # Energy
+    ('WMB', 'KMI'), ('OKE', 'ET'), ('HAL', 'BKR'), ('DVN', 'FANG'),
+    # Materials
+    ('NEM', 'GOLD'), ('NUE', 'STLD'), ('CF', 'MOS'),
+    # REITs
+    ('EQIX', 'DLR'), ('SPG', 'WELL'), ('AVB', 'EQR'),
+    # Cross-asset
+    ('SLV', 'IEF'),
+]
+
+LSTM_TICKERS_B = [
+    'CRM', 'NOW', 'PANW', 'GILD', 'REGN',
+    'TRV', 'CME', 'SCHW',
+    'DVN', 'FANG',
+    'NEM', 'EQIX',
+    'SLV', 'IEF',
+]
+
+ASSET_GROUPS_B = {
+    'technology': ['CRM', 'ADBE', 'NOW', 'PANW', 'SNPS', 'CDNS', 'MRVL', 'FTNT'],
+    'biotech': ['GILD', 'REGN', 'VRTX', 'ISRG', 'DXCM', 'IDXX', 'ZTS', 'MRNA'],
+    'financials': ['AIG', 'TRV', 'MET', 'ALL', 'BK', 'SCHW', 'ICE', 'CME'],
+    'consumer': ['TGT', 'ROST', 'ORLY', 'AZO', 'DG', 'DLTR', 'YUM', 'CMG'],
+    'industrials': ['FDX', 'NSC', 'CSX', 'WM', 'RSG', 'ITW', 'EMR', 'ROK'],
+    'energy': ['WMB', 'KMI', 'OKE', 'ET', 'HAL', 'BKR', 'DVN', 'FANG'],
+    'materials': ['NEM', 'GOLD', 'NUE', 'STLD', 'CF', 'MOS', 'ALB', 'ECL'],
+    'reits': ['EQIX', 'DLR', 'SPG', 'WELL', 'AVB', 'EQR', 'VICI', 'IRM'],
+    'utilities': ['AEP', 'D', 'SRE', 'ED', 'WEC', 'ES', 'EXC', 'PCG'],
+    'diversifier': ['SLV', 'IEF', 'HYG'],
+}
 
 # ---- Active universe (change this line to switch) ----
 UNIVERSE = UNIVERSE_EXPANDED
@@ -238,6 +308,7 @@ CONTROL_METHODS = (
     'cvar_robust',           # D:  CVaR-aware robust optimization
     'council',               # E:  Expert-gated council meta-controller
     'mlp_meta',              # G:  MLP-gated meta-controller (environment-adaptive)
+    'mpc',                   # H:  Model-predictive control over allocator exposure and stabilization
     'cmdp_lagrangian',       # F:  Simple constrained-MDP controller
     'q_learning',            # RL: Tabular Q-learning (portfolio only)
     'ppo',                   # RL: End-to-end PPO
@@ -289,6 +360,21 @@ class ControlConfig:
     council_temperature: float = 1.0
     council_min_weight: float = 0.10
     council_default_bias: tuple[float, ...] = (0.20, 0.20, 0.60)
+    # H: Model-predictive controller
+    mpc_horizon: int = 5
+    mpc_replan_every: int = 5
+    mpc_discount: float = 0.92
+    mpc_alpha_decay: float = 0.88
+    mpc_stress_reversion: float = 0.82
+    mpc_min_invested: float = 0.35
+    mpc_max_stabilizer: float = 0.45
+    mpc_risk_penalty: float = 8.0
+    mpc_turnover_penalty: float = 2.5
+    mpc_drawdown_penalty: float = 6.0
+    mpc_stress_penalty: float = 1.5
+    mpc_terminal_penalty: float = 0.75
+    mpc_max_daily_change: float = 0.18
+    mpc_objective_version: int = 2
     # F: CMDP-style constrained controller
     cmdp_constraint_type: str = 'drawdown'  # 'drawdown' or 'tail_loss'
     cmdp_constraint_kappa: float = 0.12
@@ -384,9 +470,118 @@ class EvaluationConfig:
     research_e2e_scope: str = 'baseline_only'
     enable_checkpoints: bool = True
     checkpoint_dir: str = 'checkpoints/research_runs'
+    checkpoint_match_mode: str = 'compatible'
     bootstrap_samples: int = 400
     bootstrap_block_size: int = 20
     bootstrap_seed: int = 7
+    # Cross-universe meta-learning evaluation
+    meta_learning_enabled: bool = False
+    meta_learning_universes: tuple[str, ...] = ('A', 'B')
     # Time-series cross-validation
     ts_cv_folds: int = 5
     enable_ts_cv: bool = True
+
+
+@dataclass
+class UniverseProfile:
+    """Bundles all universe-specific settings for cross-universe evaluation."""
+
+    label: str
+    tickers: list[str]
+    pairs: list[tuple[str, str]]
+    lstm_tickers: list[str]
+    asset_groups: dict[str, list[str]]
+
+
+def get_universe_profile(universe_id: str) -> UniverseProfile:
+    """Return a complete universe profile by ID ('A' or 'B')."""
+    if universe_id == 'A':
+        return UniverseProfile(
+            label='A',
+            tickers=list(UNIVERSE_EXPANDED),
+            pairs=list(PAIRS_CANDIDATES_EXPANDED),
+            lstm_tickers=list(LSTM_TICKERS_EXPANDED),
+            asset_groups=dict(ASSET_GROUPS_EXPANDED),
+        )
+    if universe_id == 'B':
+        return UniverseProfile(
+            label='B',
+            tickers=list(UNIVERSE_B),
+            pairs=list(PAIRS_CANDIDATES_B),
+            lstm_tickers=list(LSTM_TICKERS_B),
+            asset_groups=dict(ASSET_GROUPS_B),
+        )
+    raise ValueError(f"Unknown universe ID: {universe_id!r}. Choose 'A' or 'B'.")
+
+
+@contextmanager
+def use_universe(universe_id: str):
+    """Temporarily swap the active universe across all quant_stack modules.
+
+    This context manager patches the module-level UNIVERSE,
+    PAIRS_CANDIDATES, LSTM_TICKERS, ASSET_GROUPS, and TICKER_TO_GROUP
+    constants in every module that imports them, so that
+    ``load_market_data()`` and ``run_full_pipeline()`` operate on the
+    requested universe without permanent side effects.
+
+    Usage::
+
+        with use_universe('B'):
+            prices, volumes, returns, macro, sec = load_market_data()
+            results = run_full_pipeline(prices, volumes, returns, ...)
+    """
+    import importlib
+    import quant_stack.config as _cfg
+    import quant_stack.data as _data
+    import quant_stack.pipeline as _pipeline
+    import quant_stack.alpha as _alpha
+
+    profile = get_universe_profile(universe_id)
+    new_ticker_to_group = {
+        ticker: group
+        for group, tickers in profile.asset_groups.items()
+        for ticker in tickers
+    }
+
+    # Save originals
+    saved = {
+        'cfg_UNIVERSE': _cfg.UNIVERSE,
+        'cfg_PAIRS': getattr(_cfg, 'PAIRS_CANDIDATES', None),
+        'cfg_LSTM': getattr(_cfg, 'LSTM_TICKERS', None),
+        'cfg_ASSET_GROUPS': getattr(_cfg, 'ASSET_GROUPS', None),
+        'cfg_TICKER_TO_GROUP': getattr(_cfg, 'TICKER_TO_GROUP', None),
+        'data_UNIVERSE': _data.UNIVERSE,
+        'pipeline_UNIVERSE': _pipeline.UNIVERSE,
+        'alpha_UNIVERSE': _alpha.UNIVERSE,
+        'alpha_PAIRS': _alpha.PAIRS_CANDIDATES,
+        'alpha_TICKER_TO_GROUP': _alpha.TICKER_TO_GROUP,
+    }
+
+    try:
+        # Patch config module
+        _cfg.UNIVERSE = profile.tickers
+        _cfg.PAIRS_CANDIDATES = profile.pairs
+        _cfg.LSTM_TICKERS = profile.lstm_tickers
+        _cfg.ASSET_GROUPS = profile.asset_groups
+        _cfg.TICKER_TO_GROUP = new_ticker_to_group
+
+        # Patch downstream modules that imported at module level
+        _data.UNIVERSE = profile.tickers
+        _pipeline.UNIVERSE = profile.tickers
+        _alpha.UNIVERSE = profile.tickers
+        _alpha.PAIRS_CANDIDATES = profile.pairs
+        _alpha.TICKER_TO_GROUP = new_ticker_to_group
+
+        yield profile
+    finally:
+        # Restore originals
+        _cfg.UNIVERSE = saved['cfg_UNIVERSE']
+        _cfg.PAIRS_CANDIDATES = saved['cfg_PAIRS']
+        _cfg.LSTM_TICKERS = saved['cfg_LSTM']
+        _cfg.ASSET_GROUPS = saved['cfg_ASSET_GROUPS']
+        _cfg.TICKER_TO_GROUP = saved['cfg_TICKER_TO_GROUP']
+        _data.UNIVERSE = saved['data_UNIVERSE']
+        _pipeline.UNIVERSE = saved['pipeline_UNIVERSE']
+        _alpha.UNIVERSE = saved['alpha_UNIVERSE']
+        _alpha.PAIRS_CANDIDATES = saved['alpha_PAIRS']
+        _alpha.TICKER_TO_GROUP = saved['alpha_TICKER_TO_GROUP']

@@ -955,6 +955,101 @@ class CouncilController(BaseController):
 # G: MLP-Gated Meta-Controller (Environment-Adaptive Selection)
 # ============================================================
 
+def _build_attention_gate_network(input_dim: int, n_experts: int, hidden: tuple[int, ...]):
+    """Build a PyTorch gate network with self-attention and residual blocks.
+
+    Architecture:
+        Input → LayerNorm → Linear projection
+        → Self-Attention (learned feature interactions)
+        → Residual MLP blocks with GELU + LayerNorm + Dropout
+        → Output logits (n_experts)
+
+    The self-attention layer lets the network learn which environment
+    features are most relevant conditioned on the current regime, so
+    e.g. vol-of-vol matters more during stress than during calm.
+    """
+    import torch
+    import torch.nn as nn
+
+    class _FeatureAttention(nn.Module):
+        """Single-head self-attention over the feature dimension."""
+
+        def __init__(self, dim: int, dropout: float = 0.1):
+            super().__init__()
+            self.qkv = nn.Linear(dim, 3 * dim, bias=False)
+            self.proj = nn.Linear(dim, dim)
+            self.dropout = nn.Dropout(dropout)
+            self.scale = dim ** -0.5
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            # x: (batch, dim) → treat each feature as a "token" of size 1
+            # Reshape to (batch, n_features, 1) for attention
+            b, d = x.shape
+            qkv = self.qkv(x)                      # (b, 3*d)
+            q, k, v = qkv.chunk(3, dim=-1)          # each (b, d)
+            # Feature-wise attention: which features attend to which
+            attn = (q.unsqueeze(-1) @ k.unsqueeze(-2)) * self.scale  # (b, d, d)
+            attn = attn.softmax(dim=-1)
+            attn = self.dropout(attn)
+            out = (attn @ v.unsqueeze(-1)).squeeze(-1)  # (b, d)
+            return self.proj(out)
+
+    class _ResidualBlock(nn.Module):
+        def __init__(self, dim: int, dropout: float = 0.15):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim, dim),
+                nn.Dropout(dropout),
+            )
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return x + self.net(x)
+
+    class AttentionGateNet(nn.Module):
+        def __init__(self, input_dim: int, n_experts: int, hidden: tuple[int, ...]):
+            super().__init__()
+            self.input_norm = nn.LayerNorm(input_dim)
+            self.input_proj = nn.Linear(input_dim, hidden[0])
+            self.attention = _FeatureAttention(hidden[0], dropout=0.1)
+            self.attn_norm = nn.LayerNorm(hidden[0])
+
+            blocks = []
+            dims = list(hidden)
+            for i in range(len(dims)):
+                blocks.append(_ResidualBlock(dims[i], dropout=0.15))
+                if i < len(dims) - 1 and dims[i] != dims[i + 1]:
+                    blocks.append(nn.Linear(dims[i], dims[i + 1]))
+            self.residual_blocks = nn.Sequential(*blocks)
+
+            self.head = nn.Sequential(
+                nn.LayerNorm(dims[-1]),
+                nn.Linear(dims[-1], n_experts),
+            )
+            # Learnable temperature for softmax gating
+            self.log_temperature = nn.Parameter(torch.zeros(1))
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            """Return logits (pre-softmax) for each expert."""
+            h = self.input_proj(self.input_norm(x))
+            h = h + self.attention(h)
+            h = self.attn_norm(h)
+            h = self.residual_blocks(h)
+            logits = self.head(h)
+            temp = self.log_temperature.exp().clamp(min=0.1, max=5.0)
+            return logits / temp
+
+        def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
+            """Return softmax probabilities."""
+            with torch.no_grad():
+                return torch.softmax(self.forward(x), dim=-1)
+
+    return AttentionGateNet(input_dim, n_experts, hidden)
+
+
 class MLPMetaController(BaseController):
     """MLP-gated meta-controller for environment-adaptive controller selection.
 
@@ -962,10 +1057,10 @@ class MLPMetaController(BaseController):
     characteristics (alpha quality, regime structure, volatility, market
     stress), which sub-controller should be weighted most heavily?
 
-    Uses an MLP neural network over a rich environment feature vector
-    (computed from trailing windows of state history) to gate between
-    sub-controllers.  Falls back to heuristic default weights until
-    enough training data has been collected.
+    Uses a PyTorch neural network with self-attention over environment
+    features and residual MLP blocks to gate between sub-controllers.
+    Falls back to heuristic default weights until enough training data
+    has been collected.
     """
 
     label = 'mlp_meta'
@@ -1003,14 +1098,16 @@ class MLPMetaController(BaseController):
             if name not in self.experts:
                 raise ValueError(f"Unsupported mlp_meta expert: {name}")
 
-        # MLP gate model (sklearn)
+        # PyTorch gate model (built lazily on first retrain)
         self._model = None
         self._feature_dim = len(self._FEATURE_NAMES)
+        self._scaler_mu: np.ndarray | None = None
+        self._scaler_sigma: np.ndarray | None = None
 
         # Trailing state history for environment feature extraction
         self._state_history: deque[ControlState] = deque(maxlen=max(self.feature_lookback, 63))
 
-        # Training data buffers
+        # Training data buffers (replay buffer for mini-batch training)
         self._feature_buffer: list[np.ndarray] = []
         self._label_buffer: list[int] = []
         self._last_train_t: int = -999
@@ -1044,7 +1141,6 @@ class MLPMetaController(BaseController):
         vols = np.array([s.recent_vol for s in hist])
         vol_mean = float(vols.mean())
         vol_of_vol = float(vols.std()) if n > 1 else 0.0
-        # Downside semi-volatility: std of vol values above the mean (stress periods)
         above_mean = vols[vols > vol_mean]
         downside_semivol = float(above_mean.std()) if len(above_mean) > 1 else 0.0
 
@@ -1052,18 +1148,16 @@ class MLPMetaController(BaseController):
         dds = np.array([s.recent_drawdown for s in hist])
         dd_current = float(state.recent_drawdown)
         dd_mean_depth = float(dds[dds < 0].mean()) if np.any(dds < 0) else 0.0
-        dd_frequency = float(np.mean(dds < -0.02))  # fraction of days in drawdown
+        dd_frequency = float(np.mean(dds < -0.02))
 
         # --- Regime features ---
         beliefs = np.array([s.regime_belief for s in hist])
         regime_mean = float(beliefs.mean())
-        # Switch frequency: fraction of consecutive days where belief crosses 0.5
         if n > 1:
             crossings = np.abs(np.diff((beliefs > 0.5).astype(float)))
             regime_switch_freq = float(crossings.mean())
         else:
             regime_switch_freq = 0.0
-        # Regime entropy: entropy of the belief distribution
         b_clipped = np.clip(beliefs, 1e-8, 1.0 - 1e-8)
         regime_entropy = float(np.mean(-b_clipped * np.log(b_clipped) - (1 - b_clipped) * np.log(1 - b_clipped)))
         regime_risk_off_frac = float(np.mean(beliefs < 0.30))
@@ -1091,7 +1185,7 @@ class MLPMetaController(BaseController):
     # ------------------------------------------------------------------
 
     def _default_gate_weights(self, state: ControlState) -> np.ndarray:
-        """Heuristic default gate used before the MLP has enough data."""
+        """Heuristic default gate used before the network has enough data."""
         bias = self.default_bias
         if len(bias) != len(self.expert_names):
             bias = np.ones(len(self.expert_names), dtype=float)
@@ -1117,44 +1211,29 @@ class MLPMetaController(BaseController):
         return _stable_softmax(logits + np.asarray(adjustments, dtype=float), self.temperature)
 
     def _predict_gate_weights(self, state: ControlState) -> tuple[np.ndarray, np.ndarray]:
-        """Return (feature_vector, gate_weights) using MLP or default."""
+        """Return (feature_vector, gate_weights) using neural net or default."""
+        import torch
+
         x = self._compute_environment_features(state)
-        if self._model is None:
+        if self._model is None or self._scaler_mu is None:
             return x, self._default_gate_weights(state)
 
-        probs = np.asarray(self._model.predict_proba(x.reshape(1, -1))[0], dtype=float)
-        full = np.zeros(len(self.expert_names), dtype=float)
-        classes = np.asarray(getattr(self._model, 'classes_', np.arange(len(self.expert_names))), dtype=int)
-        for cls_idx, prob in zip(classes, probs):
-            if 0 <= int(cls_idx) < len(full):
-                full[int(cls_idx)] = float(prob)
-        full = np.clip(full, 1e-8, None)
-        full /= full.sum()
-        full = np.maximum(full, self.min_weight)
-        full /= full.sum()
-        return x, full
+        x_scaled = (x - self._scaler_mu) / self._scaler_sigma
+        x_tensor = torch.tensor(x_scaled, dtype=torch.float32).unsqueeze(0)
+        probs = self._model.predict_proba(x_tensor).squeeze(0).numpy()
+        probs = np.clip(probs, 1e-8, None)
+        probs = np.maximum(probs, self.min_weight)
+        probs /= probs.sum()
+        return x, probs
 
     # ------------------------------------------------------------------
-    # MLP training
+    # Neural network training
     # ------------------------------------------------------------------
-
-    def _build_model(self):
-        from sklearn.neural_network import MLPClassifier
-
-        return MLPClassifier(
-            hidden_layer_sizes=self.hidden_layers,
-            activation='relu',
-            solver='adam',
-            alpha=self.alpha_reg,
-            learning_rate_init=self.learning_rate,
-            max_iter=300,
-            early_stopping=True,
-            validation_fraction=0.15,
-            n_iter_no_change=15,
-            random_state=42,
-        )
 
     def _try_retrain(self, t: int) -> None:
+        import torch
+        import torch.nn as nn
+
         if t - self._last_train_t < self.retrain_every:
             return
         if len(self._label_buffer) < self.min_samples:
@@ -1162,13 +1241,71 @@ class MLPMetaController(BaseController):
         y = np.asarray(self._label_buffer, dtype=int)
         if len(np.unique(y)) < 2:
             return
+
         X = np.asarray(self._feature_buffer, dtype=float)
-        # Standardize features for MLP
         mu = X.mean(axis=0)
         sigma = X.std(axis=0) + 1e-8
         X_scaled = (X - mu) / sigma
-        model = self._build_model()
-        model.fit(X_scaled, y)
+
+        n_experts = len(self.expert_names)
+        model = _build_attention_gate_network(self._feature_dim, n_experts, self.hidden_layers)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.alpha_reg,
+        )
+        criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
+
+        X_t = torch.tensor(X_scaled, dtype=torch.float32)
+        y_t = torch.tensor(y, dtype=torch.long)
+        n = len(X_t)
+
+        # Train/val split for early stopping
+        val_size = max(1, int(0.15 * n))
+        train_size = n - val_size
+        X_train, X_val = X_t[:train_size], X_t[train_size:]
+        y_train, y_val = y_t[:train_size], y_t[train_size:]
+
+        batch_size = min(64, train_size)
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_state = None
+
+        model.train()
+        for epoch in range(200):
+            perm = torch.randperm(train_size)
+            epoch_loss = 0.0
+            n_batches = 0
+            for i in range(0, train_size, batch_size):
+                idx = perm[i:i + batch_size]
+                logits = model(X_train[idx])
+                loss = criterion(logits, y_train[idx])
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                epoch_loss += loss.item()
+                n_batches += 1
+
+            # Early stopping on validation
+            if val_size > 0 and (epoch + 1) % 5 == 0:
+                model.eval()
+                with torch.no_grad():
+                    val_logits = model(X_val)
+                    val_loss = criterion(val_logits, y_val).item()
+                model.train()
+                if val_loss < best_val_loss - 1e-4:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    best_state = {k: v.clone() for k, v in model.state_dict().items()}
+                else:
+                    patience_counter += 1
+                    if patience_counter >= 10:
+                        break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        model.eval()
         self._model = model
         self._scaler_mu = mu
         self._scaler_sigma = sigma
@@ -1198,7 +1335,6 @@ class MLPMetaController(BaseController):
         optimizer_config,
         state: ControlState,
     ) -> pd.Series | None:
-        # Base constrained target (shared across non-CVaR experts)
         constrained_target = allocator.optimize_target_book(
             factor_scores=factor_scores,
             alpha_scores=alpha_scores,
@@ -1208,7 +1344,6 @@ class MLPMetaController(BaseController):
         ).clip(lower=0.0)
         constrained_target = constrained_target / (constrained_target.sum() + 1e-8)
 
-        # Build each expert's book
         expert_books: dict[str, pd.Series] = {}
         for expert_name in self.expert_names:
             expert = self.experts[expert_name]
@@ -1227,15 +1362,13 @@ class MLPMetaController(BaseController):
                 frac = float(np.clip(expert.compute_invested_fraction(state), 0.0, 1.0))
                 expert_books[expert_name] = (constrained_target * frac).clip(lower=0.0)
 
-        # MLP gate
         x, gate_weights = self._predict_gate_weights(state)
 
-        # Soft-mix expert books
         combined = pd.Series(0.0, index=constrained_target.index, dtype=float)
-        council_weights_map: dict[str, float] = {}
+        gate_weights_map: dict[str, float] = {}
         for expert_name, gw in zip(self.expert_names, gate_weights):
             combined = combined.add(expert_books[expert_name] * float(gw), fill_value=0.0)
-            council_weights_map[expert_name] = float(gw)
+            gate_weights_map[expert_name] = float(gw)
 
         combined = combined.clip(lower=0.0)
         if float(combined.sum()) > 1.0:
@@ -1247,10 +1380,10 @@ class MLPMetaController(BaseController):
         self._pending_gate = gate_weights
         self._pending_books = expert_books
         self._latest_diagnostics.update({
-            'mlp_meta_gate_weights': council_weights_map,
+            'mlp_meta_gate_weights': gate_weights_map,
             'mlp_meta_dominant_expert': dominant_expert,
             'mlp_meta_gate_entropy': float(-np.sum(gate_weights * np.log(gate_weights + 1e-8))),
-            'mlp_meta_gate_source': 'mlp' if self._model is not None else 'heuristic',
+            'mlp_meta_gate_source': 'pytorch' if self._model is not None else 'heuristic',
             'mlp_meta_n_training_samples': len(self._label_buffer),
         })
         return combined
@@ -1268,9 +1401,6 @@ class MLPMetaController(BaseController):
         if expert_feedback:
             best_expert = max(expert_feedback.items(), key=lambda item: item[1])[0]
             if best_expert in self.expert_names:
-                feat = self._pending_features
-                if self._model is not None and hasattr(self, '_scaler_mu'):
-                    feat = (feat - self._scaler_mu) / self._scaler_sigma
                 self._feature_buffer.append(self._pending_features)
                 self._label_buffer.append(self.expert_names.index(best_expert))
                 self._latest_diagnostics['mlp_meta_best_expert'] = best_expert
@@ -1293,6 +1423,8 @@ class MLPMetaController(BaseController):
 
     def reset(self) -> None:
         self._model = None
+        self._scaler_mu = None
+        self._scaler_sigma = None
         self._state_history.clear()
         self._feature_buffer.clear()
         self._label_buffer.clear()
@@ -1301,6 +1433,320 @@ class MLPMetaController(BaseController):
         self._pending_books = {}
         for expert in self.experts.values():
             expert.reset()
+
+
+# ============================================================
+# H: Model-Predictive Controller
+# ============================================================
+
+class MPCController(BaseController):
+    """Receding-horizon controller over exposure and stabilization.
+
+    The MPC keeps the constrained allocator as the alpha-book engine and
+    optimizes a short horizon of two controls:
+    - invested fraction
+    - stabilizer mix into a minimum-variance core
+
+    This yields a structured controller that can respond to alpha strength,
+    volatility, drawdown, and regime stress without relying on learned value
+    functions.
+    """
+
+    label = 'mpc'
+
+    def __init__(self, config: ControlConfig) -> None:
+        super().__init__(config)
+        self.horizon = max(2, int(config.mpc_horizon))
+        self.replan_every = max(1, int(config.mpc_replan_every))
+        self.discount = float(config.mpc_discount)
+        self.alpha_decay = float(config.mpc_alpha_decay)
+        self.stress_reversion = float(config.mpc_stress_reversion)
+        self.min_invested = float(config.mpc_min_invested)
+        self.max_stabilizer = float(config.mpc_max_stabilizer)
+        self.risk_penalty = float(config.mpc_risk_penalty)
+        self.turnover_penalty = float(config.mpc_turnover_penalty)
+        self.drawdown_penalty = float(config.mpc_drawdown_penalty)
+        self.stress_penalty = float(config.mpc_stress_penalty)
+        self.terminal_penalty = float(config.mpc_terminal_penalty)
+        self.max_daily_change = float(config.mpc_max_daily_change)
+
+        self._plan_start_t = -999
+        self._plan: list[tuple[float, float]] = []
+        self._plan_source: str = 'none'
+        self._last_plan_objective: float = 0.0
+
+    def uses_direct_weights(self) -> bool:
+        return True
+
+    def compute_invested_fraction(self, state: ControlState) -> float:
+        if self._plan:
+            step = int(np.clip(state.t - self._plan_start_t, 0, len(self._plan) - 1))
+            return float(self._plan[step][0])
+        invested, _ = self._initial_controls(state)
+        return invested
+
+    def _stress_score(self, state: ControlState) -> float:
+        vol_term = max(0.0, state.recent_vol - 0.14) / 0.16
+        dd_term = max(0.0, -state.recent_drawdown - 0.04) / 0.10
+        regime_term = max(0.0, 0.50 - state.regime_belief) / 0.25
+        trend_term = max(0.0, -state.trend) / 0.20
+        return float(np.clip(
+            0.9 * vol_term + 1.1 * dd_term + 0.8 * regime_term + 0.3 * trend_term,
+            0.0,
+            3.0,
+        ))
+
+    def _initial_controls(self, state: ControlState) -> tuple[float, float]:
+        stress = self._stress_score(state)
+        alpha_boost = float(np.tanh(6.0 * state.alpha_strength))
+        invested = np.clip(
+            0.94
+            + 0.05 * alpha_boost
+            + 0.08 * (state.regime_belief - 0.50)
+            - 0.18 * stress
+            - 0.10 * max(0.0, -state.recent_drawdown - 0.05),
+            self.min_invested,
+            1.0,
+        )
+        stabilizer_mix = np.clip(
+            0.08
+            + 0.18 * stress
+            + 0.30 * max(0.0, -state.recent_drawdown - 0.05)
+            + 0.10 * max(0.0, 0.45 - state.regime_belief),
+            0.0,
+            self.max_stabilizer,
+        )
+        return float(invested), float(stabilizer_mix)
+
+    def _compose_book(
+        self,
+        alpha_book: pd.Series,
+        stabilizer_book: pd.Series,
+        invested_fraction: float,
+        stabilizer_mix: float,
+    ) -> pd.Series:
+        core = (1.0 - stabilizer_mix) * alpha_book + stabilizer_mix * stabilizer_book
+        core = core.clip(lower=0.0)
+        core_sum = float(core.sum())
+        if core_sum < 1e-8:
+            core = alpha_book if float(alpha_book.sum()) > 1e-8 else stabilizer_book
+            core_sum = float(core.sum())
+        core = core / (core_sum + 1e-8)
+        return float(invested_fraction) * core
+
+    def _plan_controls(
+        self,
+        alpha_book: pd.Series,
+        stabilizer_book: pd.Series,
+        alpha_view: pd.Series,
+        cov: np.ndarray,
+        prev_book: pd.Series,
+        state: ControlState,
+    ) -> tuple[list[tuple[float, float]], str, float]:
+        from scipy.optimize import minimize as sp_minimize
+
+        horizon = self.horizon
+        alpha_vec = alpha_view.reindex(alpha_book.index).fillna(0.0).to_numpy(dtype=float)
+        alpha_base = alpha_book.reindex(alpha_book.index).fillna(0.0)
+        stabilizer_base = stabilizer_book.reindex(alpha_book.index).fillna(0.0)
+        prev_vec = prev_book.reindex(alpha_book.index).fillna(0.0).to_numpy(dtype=float)
+        stress0 = self._stress_score(state)
+        invested0, stabilizer0 = self._initial_controls(state)
+
+        if self._plan and self._plan_start_t >= 0:
+            prior = list(self._plan)
+            if len(prior) < horizon:
+                prior.extend([prior[-1]] * (horizon - len(prior)))
+            shifted = prior[1:horizon] + [prior[min(len(prior) - 1, horizon - 1)]]
+            x0 = np.array(
+                [step[0] for step in shifted] + [step[1] for step in shifted],
+                dtype=float,
+            )
+        else:
+            x0 = np.array([invested0] * horizon + [stabilizer0] * horizon, dtype=float)
+
+        bounds: list[tuple[float, float]] = []
+        current_invested = float(np.clip(state.invested_fraction, 0.0, 1.0))
+        first_low = max(self.min_invested, current_invested - self.max_daily_change)
+        first_high = min(1.0, current_invested + self.max_daily_change)
+        bounds.append((first_low, first_high))
+        bounds.extend([(self.min_invested, 1.0)] * (horizon - 1))
+        bounds.extend([(0.0, self.max_stabilizer)] * horizon)
+
+        def objective(params: np.ndarray) -> float:
+            invest_seq = np.clip(params[:horizon], self.min_invested, 1.0)
+            mix_seq = np.clip(params[horizon:], 0.0, self.max_stabilizer)
+            total = 0.0
+            prev = prev_vec.copy()
+            for h in range(horizon):
+                invest = float(invest_seq[h])
+                mix = float(mix_seq[h])
+                weights = self._compose_book(alpha_base, stabilizer_base, invest, mix).to_numpy(dtype=float)
+                alpha_scale = float(self.alpha_decay ** h)
+                stress_scale = 1.0 + 1.25 * stress0 * float(self.stress_reversion ** h)
+                expected_ret = alpha_scale * float(alpha_vec @ weights)
+                risk = float(weights @ cov @ weights)
+                turnover = float(np.sum((weights - prev) ** 2))
+                dd_proxy = float(
+                    max(0.0, -state.recent_drawdown)
+                    * (invest ** 2)
+                    * max(0.15, 1.0 - 1.5 * mix)
+                    * (self.stress_reversion ** h)
+                )
+                stress_cap = float(np.clip(
+                    0.92 - 0.10 * stress0 + 0.04 * max(0.0, state.regime_belief - 0.50),
+                    self.min_invested,
+                    1.0,
+                ))
+                exposure_penalty = float(
+                    self.stress_penalty * stress_scale * max(0.0, invest - stress_cap) ** 2
+                )
+                smooth = 0.0
+                if h > 0:
+                    smooth = float(
+                        (invest - invest_seq[h - 1]) ** 2
+                        + 0.5 * (mix - mix_seq[h - 1]) ** 2
+                    )
+                stage_value = (
+                    expected_ret
+                    - self.risk_penalty * stress_scale * risk
+                    - self.turnover_penalty * turnover
+                    - self.drawdown_penalty * dd_proxy
+                    - 0.5 * self.stress_penalty * smooth
+                    - exposure_penalty
+                )
+                total -= float((self.discount ** h) * stage_value)
+                prev = weights
+            terminal_target = self._compose_book(
+                alpha_base,
+                stabilizer_base,
+                float(invest_seq[-1]),
+                float(mix_seq[-1]),
+            ).to_numpy(dtype=float)
+            total += self.terminal_penalty * float(np.sum((prev - terminal_target) ** 2))
+            return float(total)
+
+        try:
+            result = sp_minimize(
+                objective,
+                x0=x0,
+                method='SLSQP',
+                bounds=bounds,
+                options={'maxiter': 120, 'ftol': 1e-7},
+            )
+            if result.success:
+                invest_seq = np.clip(result.x[:horizon], self.min_invested, 1.0)
+                mix_seq = np.clip(result.x[horizon:], 0.0, self.max_stabilizer)
+                plan = [(float(b), float(s)) for b, s in zip(invest_seq, mix_seq)]
+                return plan, 'optimized', float(result.fun)
+        except Exception:
+            pass
+
+        fallback_plan = [(invested0, stabilizer0) for _ in range(horizon)]
+        return fallback_plan, 'heuristic', float(objective(x0))
+
+    def build_target_weights(
+        self,
+        allocator,
+        factor_scores: pd.Series,
+        alpha_scores: pd.Series,
+        confidence: pd.Series,
+        recent_returns: pd.DataFrame | None,
+        prev_weights: pd.Series | None,
+        optimizer_config,
+        state: ControlState,
+    ) -> pd.Series | None:
+        tickers = factor_scores.index
+        alpha_book = allocator.optimize_target_book(
+            factor_scores=factor_scores,
+            alpha_scores=alpha_scores,
+            confidence=confidence,
+            recent_returns=recent_returns,
+            prev_weights=prev_weights,
+        ).reindex(tickers).fillna(0.0).clip(lower=0.0)
+        alpha_book = alpha_book / (float(alpha_book.sum()) + 1e-8)
+        stabilizer_book = allocator.estimate_min_var_core(
+            tickers, recent_returns, confidence,
+        ).reindex(tickers).fillna(0.0)
+        stabilizer_book = stabilizer_book / (float(stabilizer_book.sum()) + 1e-8)
+
+        if recent_returns is None or len(recent_returns) < 40:
+            invested, stabilizer_mix = self._initial_controls(state)
+            weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
+            self._latest_diagnostics.update({
+                'mpc_invested_target': invested,
+                'mpc_stabilizer_mix': stabilizer_mix,
+                'mpc_plan_step': 0,
+                'mpc_plan_source': 'heuristic',
+                'mpc_plan_objective': 0.0,
+                'overlay_size': stabilizer_mix,
+            })
+            return weights
+
+        aligned_returns = recent_returns.reindex(columns=tickers).fillna(0.0)
+        try:
+            cov = LedoitWolf().fit(aligned_returns.values).covariance_
+        except Exception:
+            invested, stabilizer_mix = self._initial_controls(state)
+            weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
+            self._latest_diagnostics.update({
+                'mpc_invested_target': invested,
+                'mpc_stabilizer_mix': stabilizer_mix,
+                'mpc_plan_step': 0,
+                'mpc_plan_source': 'fallback_cov',
+                'mpc_plan_objective': 0.0,
+                'overlay_size': stabilizer_mix,
+            })
+            return weights
+
+        alpha_view = (alpha_scores * confidence).reindex(tickers).fillna(0.0)
+        alpha_scale = float(alpha_view.abs().quantile(0.90))
+        if alpha_scale > 1e-8:
+            alpha_view = 0.0015 * alpha_view / alpha_scale
+        else:
+            alpha_view = alpha_view * 0.0
+        alpha_view = alpha_view.clip(lower=-0.003, upper=0.003)
+
+        prev_book = (
+            prev_weights.reindex(tickers).fillna(0.0)
+            if prev_weights is not None
+            else alpha_book * state.invested_fraction
+        )
+
+        needs_replan = (
+            not self._plan
+            or state.t - self._plan_start_t >= self.replan_every
+            or state.t - self._plan_start_t >= len(self._plan)
+        )
+        if needs_replan:
+            self._plan, self._plan_source, self._last_plan_objective = self._plan_controls(
+                alpha_book=alpha_book,
+                stabilizer_book=stabilizer_book,
+                alpha_view=alpha_view,
+                cov=cov,
+                prev_book=prev_book,
+                state=state,
+            )
+            self._plan_start_t = state.t
+
+        plan_step = int(np.clip(state.t - self._plan_start_t, 0, len(self._plan) - 1))
+        invested, stabilizer_mix = self._plan[plan_step]
+        weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
+        self._latest_diagnostics.update({
+            'mpc_invested_target': float(invested),
+            'mpc_stabilizer_mix': float(stabilizer_mix),
+            'mpc_plan_step': int(plan_step),
+            'mpc_plan_source': self._plan_source,
+            'mpc_plan_objective': float(self._last_plan_objective),
+            'overlay_size': float(stabilizer_mix),
+        })
+        return weights
+
+    def reset(self) -> None:
+        self._plan_start_t = -999
+        self._plan = []
+        self._plan_source = 'none'
+        self._last_plan_objective = 0.0
 
 
 # Q-Learning Controller (wraps existing PortfolioConstructionRL)
@@ -1422,6 +1868,7 @@ def build_controller(config: ControlConfig) -> BaseController:
         'cvar_robust': CVaRRobustController,
         'council': CouncilController,
         'mlp_meta': MLPMetaController,
+        'mpc': MPCController,
         'cmdp_lagrangian': CMDPLagrangianController,
         'q_learning': QLearningController,
     }

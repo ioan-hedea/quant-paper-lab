@@ -246,6 +246,8 @@ def run_full_pipeline(
         'mlp_meta_weight_regime_rules': [], 'mlp_meta_weight_linucb': [], 'mlp_meta_weight_cvar_robust': [],
         'mlp_meta_dominant_expert': [], 'mlp_meta_best_expert': [], 'mlp_meta_gate_entropy': [],
         'mlp_meta_gate_source': [], 'mlp_meta_n_training_samples': [],
+        'mpc_invested_targets': [], 'mpc_stabilizer_mixes': [],
+        'mpc_plan_steps': [], 'mpc_plan_sources': [], 'mpc_plan_objectives': [],
         'cmdp_lambdas': [], 'cmdp_constraint_costs': [], 'cmdp_violations': [],
         'control_method': control_method,
     }
@@ -411,6 +413,7 @@ def run_full_pipeline(
         if use_new_controller and controller is not None and ctrl_state is not None:
             portfolio_ret, convexity_diagnostics = controller.apply_return_overlay(portfolio_ret, ctrl_state)
             controller_diagnostics = controller.current_diagnostics()
+            overlay_size_selected = float(controller_diagnostics.get('overlay_size', overlay_size_selected))
         else:
             convexity_diagnostics = {
                 'convexity_mode': 0,
@@ -616,6 +619,11 @@ def run_full_pipeline(
         results['mlp_meta_gate_entropy'].append(float(controller_diagnostics.get('mlp_meta_gate_entropy', 0.0)))
         results['mlp_meta_gate_source'].append(str(controller_diagnostics.get('mlp_meta_gate_source', 'none')))
         results['mlp_meta_n_training_samples'].append(int(controller_diagnostics.get('mlp_meta_n_training_samples', 0)))
+        results['mpc_invested_targets'].append(float(controller_diagnostics.get('mpc_invested_target', 0.0)))
+        results['mpc_stabilizer_mixes'].append(float(controller_diagnostics.get('mpc_stabilizer_mix', 0.0)))
+        results['mpc_plan_steps'].append(int(controller_diagnostics.get('mpc_plan_step', 0)))
+        results['mpc_plan_sources'].append(str(controller_diagnostics.get('mpc_plan_source', 'none')))
+        results['mpc_plan_objectives'].append(float(controller_diagnostics.get('mpc_plan_objective', 0.0)))
         results['cmdp_lambdas'].append(float(controller_diagnostics.get('cmdp_lambda', 0.0)))
         results['cmdp_constraint_costs'].append(float(controller_diagnostics.get('cmdp_constraint_cost', 0.0)))
         results['cmdp_violations'].append(float(controller_diagnostics.get('cmdp_violation', 0.0)))

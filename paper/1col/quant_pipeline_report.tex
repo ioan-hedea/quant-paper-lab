@@ -1678,6 +1678,114 @@ is unchanged.}
 \end{figure}
 }{}
 
+\section{Distortion Risk and the $\mathcal{Q}/\mathcal{T}$ Decomposition}
+\label{app:distortion}
+
+This appendix formalizes the connection between the controller families
+evaluated in the paper and classical distortion-risk theory
+\cite{yaari1987,schmeidler1989,wang2000}. The aim is to show that CVaR,
+convexity shaping, and the meta-controllers each correspond to a specific
+distortion of the portfolio return distribution, and that the composition
+$\mathcal{S}_{D+}=\mathcal{T}_{\text{convex}}\circ\mathcal{Q}_{\text{CVaR}}$
+has a clean dual-theory interpretation.
+
+\paragraph{Distortion risk measures.}
+A \emph{distortion function} is a non-decreasing map $g:[0,1]\to[0,1]$ with
+$g(0)=0$, $g(1)=1$. Given a loss random variable $X$ with distribution
+function $F_X$, the distortion risk measure induced by $g$ is
+\[
+\rho_g(X)=\int_0^\infty g\bigl(1-F_X(x)\bigr)\,dx
+  -\int_{-\infty}^0\bigl[1-g\bigl(1-F_X(x)\bigr)\bigr]\,dx.
+\]
+Coherent risk measures (sub-additive, positive-homogeneous, translation-invariant,
+monotone) correspond precisely to \emph{concave} distortion functions
+\cite{wang2000}.
+
+\paragraph{CVaR as a distortion.}
+Conditional Value-at-Risk at level $\alpha$ is the distortion risk measure
+with the piecewise-linear distortion
+\[
+g_{\alpha}(u)=\min\!\Bigl(\frac{u}{1-\alpha},\,1\Bigr).
+\]
+This is concave, hence CVaR is coherent; it places all probability mass on
+the worst $1{-}\alpha$ fraction of outcomes. In our pipeline the CVaR-robust
+controller (Method D) uses this distortion during portfolio selection:
+the Rockafellar--Uryasev auxiliary variable $\zeta$ implements
+$\rho_{g_{0.95}}(L_t(w))$ as a linear program, and the penalty
+$\lambda_{\text{CVaR}}\cdot\rho_{g_{0.95}}$ reshapes the weight solution
+toward distributions with lighter left tails. This is a \emph{selection
+operator} $\mathcal{Q}_{\text{CVaR}}$: it changes which portfolio is
+chosen, but does not alter realized returns after the fact.
+
+\paragraph{Convexity as an outcome distortion.}
+The D+ convexity layer applies a deterministic payoff transformation
+\[
+\tilde{r}_t = r_t^{\text{net}} - c(m_t)
+  + \lambda_{m_t}\max(0,\,\tau-r_t^{\text{net}})^2,
+\]
+where $m_t\in\{0,1,2\}$ is a stress mode selected by regime belief,
+drawdown, and volatility. In dual-theory language this is an \emph{outcome
+operator} $\mathcal{T}_{\text{convex}}$: it transforms realized returns
+rather than changing the portfolio selection. Formally it corresponds to a
+non-linear, state-dependent distortion of the cumulative distribution of
+realized returns. Unlike CVaR, it is not coherent (the quadratic floor
+introduces convexity), but it has a clear economic interpretation: the
+agent pays a carry cost $c(m_t)$ and receives downside protection whose
+value increases quadratically as realized returns fall below the threshold
+$\tau$.
+
+\paragraph{Composition $\mathcal{S}_{D+}$.}
+The winning controller in our evaluation composes both:
+\[
+\mathcal{S}_{D+}
+  =\mathcal{T}_{\text{convex}}\circ\mathcal{Q}_{\text{CVaR}}.
+\]
+First, the CVaR penalty distorts the portfolio-selection distribution
+(reshaping the weight vector toward lower tail risk). Then the convexity
+layer distorts the realized-return distribution (compressing left-tail
+losses at the cost of a carry). The composition can be viewed as a
+two-stage distortion of the loss distribution:
+\begin{enumerate}[leftmargin=1.5em,itemsep=1pt]
+\item \textbf{Selection stage} ($\mathcal{Q}$): concave distortion
+  $g_\alpha$ applied to the scenario-based loss distribution during
+  optimization, producing a weight vector $w_t^*$ with lower CVaR;
+\item \textbf{Outcome stage} ($\mathcal{T}$): non-linear payoff
+  transformation applied to realized returns, further compressing
+  left-tail events.
+\end{enumerate}
+
+\paragraph{Other controllers in this language.}
+The decomposition cleanly classifies all controller families:
+\begin{itemize}[leftmargin=1.5em,itemsep=1pt]
+\item \emph{Rules, bandits, RL, CMDP}: These act through
+  $\mathcal{Q}_\pi$ (they select an invested fraction or action, changing
+  the portfolio but not the realized return once the portfolio is fixed).
+  They correspond to implicit, typically non-coherent, distortions that
+  depend on the policy's state--action mapping.
+\item \emph{CVaR-robust (D)}: Explicit coherent distortion
+  $g_{0.95}$ at the selection stage.
+\item \emph{Convexity (D+ layer)}: Explicit non-linear outcome
+  distortion $\mathcal{T}$.
+\item \emph{Council / MLP meta-control (E, G)}: A mixture
+  $\sum_k w_k\,\mathcal{S}_k$ of expert operators, where the gate
+  weights $w_k$ are learned. The mixture of distortions is itself a
+  distortion only if the gate is deterministic; otherwise it is a
+  randomized operator.
+\end{itemize}
+
+\paragraph{Why the composition helps.}
+Yaari's dual theory \cite{yaari1987} shows that an agent who evaluates
+lotteries by $\rho_g$ rather than expected utility can rationally pay a
+premium for downside protection. The carry cost $c(m_t)$ in the convexity
+layer is exactly such a premium. The CVaR stage reduces left-tail risk
+during construction; the convexity stage further compresses tail events
+that survive the first distortion. Our empirical result---that $D+$
+dominates $D$ and that both dominate learned controllers---is consistent
+with the theoretical prediction that explicit, structured distortions
+outperform approximate selection-only policies in a low-signal, noisy
+environment.
+
+
 \begin{thebibliography}{99}
 
 \bibitem{almgren2000}
