@@ -1,0 +1,54 @@
+\begin{table}[H]
+\centering
+\caption{Ablation summary across train/test split settings.}
+\label{tab:ablation_summary}
+\begin{tabular}{@{} l r r r r r @{}}
+\toprule
+Component & Mean Return & Mean Vol. & Mean Sharpe & Mean Max DD & Mean Calmar \\
+\midrule
+Factor Only & 15.1\% & 16.3\% & 0.71 & $-15.3\%$ & 0.99 \\
+Allocator Fixed Weights & 10.3\% & 12.0\% & 0.57 & $-12.0\%$ & 0.88 \\
+Alpha Stack No RL & 10.4\% & 12.0\% & 0.58 & $-12.0\%$ & 0.90 \\
+Portfolio RL Fixed Weights & 8.2\% & 10.7\% & 0.44 & $-10.9\%$ & 0.77 \\
+Full Pipeline Fixed Weights & 8.5\% & 10.7\% & 0.47 & $-11.1\%$ & 0.79 \\
+Full Pipeline & 8.2\% & 10.7\% & 0.45 & $-10.9\%$ & 0.77 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Rolling-window robustness summary for the full pipeline.}
+\label{tab:robustness_summary}
+\begin{tabular}{@{} l r @{}}
+\toprule
+Statistic & Value \\
+\midrule
+Rolling windows & 6 \\
+Median full-pipeline Sharpe & 0.79 \\
+Median full-pipeline Calmar & 1.09 \\
+Median full-pipeline Max DD & $-8.6\%$ \\
+Frac. windows full beats factor on drawdown & 100\% \\
+Frac. windows full beats factor on Calmar & 50\% \\
+Frac. windows full beats SPY on Sharpe & 50\% \\
+Frac. windows full beats SPY on Calmar & 67\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Block-bootstrap significance for full pipeline versus baselines (Sharpe deltas).}
+\label{tab:bootstrap_significance}
+\begin{tabular}{@{} l r r r @{}}
+\toprule
+Comparison & Delta Sharpe & 95\% CI & p-value \\
+\midrule
+Full - SPY & -0.27 & [-1.08, 0.41] & 0.450 \\
+Full - Factor Benchmark & -0.33 & [-0.75, 0.10] & 0.135 \\
+Full - Vol-Target & -0.34 & [-0.78, 0.10] & 0.160 \\
+Full - DD-Delever & -0.15 & [-0.63, 0.28] & 0.455 \\
+Full - E2E RL (PPO) & 0.00 & [-0.96, 0.94] & 0.975 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -45,26 +45,31 @@ Portfolio management systems often separate alpha generation from risk control,
 but the question of which control mechanism works best remains underexplored.
 This paper systematically compares 19 control approaches over a finance-first
 alpha engine built from factor, GARCH, and HMM sleeves, using frozen-bundle
-evaluation across 77 traded tickers and 13 years of daily data from April 2013
-through March 2026. The compared methods include no control beyond the alpha
-engine, simple rules, contextual bandits, supervised control, CVaR-aware robust
-optimization, convexity-aware protection modes, a learned council
-meta-controller, an MLP-gated meta-controller, a CMDP-Lagrangian controller,
-and Q-learning RL. Results show
-that the strongest overall point-estimate trade-off comes from adding convexity
-to the robust optimizer: \texttt{D\_plus\_convexity} reaches mean Sharpe 0.85
-and Calmar 0.94 versus 0.81 and 0.68 for plain CVaR-robust, 0.65 for the
-MLP-gated meta-controller, 0.64 for the logistic council, 0.42 for LinUCB,
-0.41 for regime-aware rules, and 0.23 for Q-learning RL. The best single run,
-\texttt{D\_plus\_convexity\_tf0.50}, reaches 21.62\% annualized return with
-1.03 Sharpe. Reference-split block-bootstrap tests already show that
-\texttt{D\_plus\_convexity} improves on SPY, LinUCB, regime rules, and the
-MLP meta-controller on Sharpe, while its edge over plain CVaR-robust is not
-yet decisive on that metric. No single method dominates every metric:
-volatility targeting and ensemble-min have the shallowest drawdowns,
-regime-aware rules remain the strongest low-complexity baseline, and learned
-meta-control is promising but still below the convexity-enhanced robust stack.
-The paper's contribution is therefore a risk-shaping framework for portfolio control rather than benchmark rhetoric: in this frozen-bundle evaluation, downside-aware outcome selection plus convex payoff transformation dominates the learned alternatives, while learning is most useful as meta-control rather than as the primary decision layer.
+evaluation across two disjoint universes of 77 and 75 traded tickers and 13
+years of daily data from April 2013 through March 2026. The compared methods
+include no control beyond the alpha engine, simple rules, contextual bandits,
+supervised control, CVaR-aware robust optimization, convexity-aware protection
+modes, a learned council meta-controller, an MLP-gated meta-controller, a
+CMDP-Lagrangian controller, a predictive-control MPC controller, and
+Q-learning RL. Results show that the robust family dominates both universes,
+but the best robust variant is environment-dependent. In Universe A, the
+strongest overall point estimate is \texttt{D\_plus\_convexity}, with mean
+Sharpe 0.84 and Calmar 0.95 versus 0.81 and 0.69 for plain
+CVaR-robust. In Universe B, plain \texttt{D\_cvar\_robust} is strongest at
+0.70 mean Sharpe, while \texttt{E\_council} and \texttt{H\_mpc} both cluster
+near 0.65 with materially shallower drawdowns. The best single run,
+\texttt{D\_plus\_convexity\_tf0.50} in Universe A, reaches 21.4\% annualized
+return with 1.00 Sharpe. Reference-split block-bootstrap tests show that
+Universe-A \texttt{D\_plus\_convexity} improves on LinUCB, the council, the
+MLP gate, and MPC on Sharpe, while its edge over plain CVaR-robust is not
+decisive; in Universe B, plain CVaR-robust remains the point-estimate leader
+but is not cleanly separated from \texttt{D\_plus\_convexity},
+\texttt{E\_council}, or \texttt{H\_mpc}. The paper's contribution is
+therefore a risk-shaping framework for portfolio control rather than benchmark
+rhetoric: downside-aware outcome selection dominates the learned alternatives
+across both universes, convex payoff transformation is highly valuable when
+tail asymmetry is strong, and learning is most useful as meta-control rather
+than as the primary decision layer.
 \end{abstract}
 
 \medskip
@@ -336,12 +341,15 @@ component.
 
 \subsection{Universe}
 
-The revised frozen-bundle uses the expanded universe rather than the smaller
-development basket. It contains 77 traded tickers spread across technology,
-financials, healthcare, consumer staples, energy, industrials, materials, real
-estate, utilities, communications, consumer discretionary, and diversifier
-exposures such as GLD, TLT, and VNQ. SPY serves as the passive equity benchmark
-throughout.
+The revised frozen-bundle uses two disjoint universes rather than a single
+development basket. Universe A contains 77 traded tickers spread across
+technology, financials, healthcare, consumer staples, energy, industrials,
+materials, real estate, utilities, communications, consumer discretionary, and
+diversifier exposures such as GLD, TLT, and VNQ. Universe B contains 75
+non-overlapping names with stronger mid-cap technology, biotech, REIT,
+midstream-energy, and materials tilts. SPY serves as the passive equity
+benchmark in both universes so that the control comparisons remain externally
+calibrated on the same calendar windows.
 
 \subsection{Data Sources}
 
@@ -549,7 +557,12 @@ $\mathcal{S}_{D+}=\mathcal{T}_{\text{convex}}\circ\mathcal{Q}_{\text{CVaR}}$.
 
 This operator lens also connects the controller comparison to classical distortion-risk ideas. Dual-theory and distorted-expectation views interpret risk control as transforming probabilities or outcomes rather than only changing point forecasts \cite{yaari1987,schmeidler1989,wang2000}. In that language, CVaR is a coherent left-tail distortion applied during portfolio selection, while the convexity layer is a discrete outcome distortion applied to realized returns. The framework therefore does more than label winners: it classifies controllers by how they reshape the induced return distribution.
 
-The key empirical result is therefore not only that \texttt{D+} wins, but that the winner composes two different risk-shaping operations. Most learning-based controllers in the bundle mainly act through a selection operator $\mathcal{Q}_\pi$. The convexity layer contributes through an outcome operator $\mathcal{T}_\pi$. The strongest controller is the first one in the study that combines both in a structured way.
+The key empirical result is therefore not only that the robust family wins, but
+that its strongest variants compose two different risk-shaping operations. Most
+learning-based controllers in the bundle mainly act through a selection
+operator $\mathcal{Q}_\pi$. The convexity layer contributes through an outcome
+operator $\mathcal{T}_\pi$. The peak Universe-A controller is the first one in
+the study that combines both in a structured way.
 
 \begin{center}
 \small
@@ -731,17 +744,20 @@ rather than purely cosmetic.
 
 \section{Experimental Design}
 
-The revised frozen-bundle used in the paper contains 3{,}269 daily observations
-from April 1, 2013 through March 27, 2026. The archived bundle reported here is
-the timestamped results folder \texttt{results/20260330\_033844}. It contains
-legacy ablations, 19 control-method candidates across three train/test split
+The revised frozen-bundle used in the paper now consists of two disjoint
+universe runs, each with 3{,}269 daily observations from April 2, 2013 through
+March 30, 2026. The archived bundles reported here are the timestamped results
+folders \texttt{results/20260330\_221820\_universe\_A} and
+\texttt{results/20260331\_002747\_universe\_B}. Each contains legacy
+ablations, 19 control-method candidates across three train/test split
 settings, a strict-timing check, six rolling windows, four cost settings,
 three rebalance-band settings, three macro-lag settings, four reward settings,
-and five blocked time-series CV folds. The manuscript is tied to that explicit
-artifact bundle, especially \texttt{research\_summary.json},
-\texttt{research\_control\_comparison.csv}, and the companion CSV and PNG
-outputs. This does not eliminate prior exploratory iteration, but it does make
-the reported bundle explicit and reproducible.
+and five blocked time-series CV folds. The manuscript is tied to those
+explicit artifact bundles, especially \texttt{research\_control\_comparison.csv},
+\texttt{research\_metrics.csv}, \texttt{research\_control\_significance.csv},
+and the companion CSV and PNG outputs. This does not eliminate prior
+exploratory iteration, but it does make the reported bundles explicit and
+reproducible.
 The codebase, manuscript sources, and artifact layout are maintained in the
 public repository \url{https://github.com/ioan-hedea/quant-paper-lab}, so the
 paper's frozen-bundle framing points to a concrete implementation record rather
@@ -831,33 +847,28 @@ train/test split settings used in the frozen-bundle.
 \begin{table*}[t]
 \centering
 \small
-\caption{Control-comparison summary across train/test split settings. All
-methods share the same finance-first alpha engine and constrained allocator.
+\caption{Representative controller summary across the two disjoint universes.
+All methods share the same finance-first alpha engine and constrained allocator.
+Universe A is the original 77-ticker bundle; Universe B is the zero-overlap
+75-ticker bundle. Full 19-method rankings remain in the archived CSVs.
 Annualized figures.}
 \label{tab:metrics}
-\begin{tabular}{@{} l r r r r r @{}}
+\begin{tabular}{@{} l r r r r r r @{}}
 \toprule
-\textbf{Controller} & \textbf{Return} & \textbf{Vol.} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
+\textbf{Controller} & \textbf{A Ret.} & \textbf{A Sh.} & \textbf{A Max DD} & \textbf{B Ret.} & \textbf{B Sh.} & \textbf{B Max DD} \\
 \midrule
-No control (alpha engine) & 9.2\% & 13.4\% & 0.40 & $-$19.8\% & 0.46 \\
-A1: Fixed & 9.0\% & 12.7\% & 0.40 & $-$18.6\% & 0.48 \\
-A2: Vol-target & 6.9\% & 10.0\% & 0.34 & $-$13.3\% & 0.51 \\
-A3: DD-Delever & 6.6\% & 11.7\% & 0.25 & $-$18.4\% & 0.36 \\
-A4: Regime rules & 8.8\% & 11.9\% & 0.41 & $-$16.1\% & 0.54 \\
-A5: Ensemble (mean) & 7.4\% & 11.5\% & 0.32 & $-$15.3\% & 0.48 \\
-A5: Ensemble (min) & 6.6\% & 10.1\% & 0.30 & $-$12.7\% & 0.51 \\
-B1: LinUCB & 9.0\% & 12.3\% & 0.42 & $-$18.0\% & 0.50 \\
-B2: Thompson & 7.9\% & 12.3\% & 0.33 & $-$18.6\% & 0.42 \\
-B3: Eps-greedy & 8.4\% & 12.3\% & 0.37 & $-$18.0\% & 0.46 \\
-C: Supervised & 8.9\% & 12.5\% & 0.40 & $-$19.2\% & 0.45 \\
-D: CVaR-robust & 17.6\% & 17.3\% & 0.81 & $-$26.4\% & 0.68 \\
-\textbf{D+: CVaR + convexity} & \textbf{17.8\%} & \textbf{16.5\%} & \textbf{0.85} & \textbf{$-$18.9\%} & \textbf{0.94} \\
-E: Council & 12.9\% & 14.1\% & 0.64 & $-$20.8\% & 0.60 \\
-E+: Council + convexity & 11.7\% & 13.6\% & 0.57 & $-$17.3\% & 0.67 \\
-G: MLP meta & 12.8\% & 13.9\% & 0.65 & $-$19.7\% & 0.63 \\
-G+: MLP meta + convexity & 11.8\% & 13.4\% & 0.59 & $-$17.5\% & 0.68 \\
-F: CMDP-Lagrangian & 8.1\% & 12.3\% & 0.35 & $-$18.4\% & 0.43 \\
-RL: Q-learning & 6.2\% & 10.9\% & 0.23 & $-$15.3\% & 0.41 \\
+No control (alpha engine) & 9.3\% & 0.41 & $-$19.5\% & 10.5\% & 0.58 & $-$12.0\% \\
+A1: Fixed & 9.0\% & 0.40 & $-$18.6\% & 10.1\% & 0.58 & $-$11.3\% \\
+A4: Regime rules & 8.8\% & 0.42 & $-$15.8\% & 9.4\% & 0.55 & $-$10.4\% \\
+B1: LinUCB & 8.8\% & 0.42 & $-$17.5\% & 9.9\% & 0.58 & $-$10.8\% \\
+C: Supervised & 8.7\% & 0.40 & $-$19.0\% & 9.8\% & 0.59 & $-$11.7\% \\
+D: CVaR-robust & 17.7\% & 0.81 & $-$26.4\% & \textbf{14.0\%} & \textbf{0.70} & $-$14.5\% \\
+\textbf{D+: CVaR + convexity} & \textbf{17.8\%} & \textbf{0.84} & \textbf{$-$18.6\%} & 12.9\% & 0.64 & $-$14.1\% \\
+E: Council & 12.8\% & 0.65 & $-$20.9\% & 11.6\% & 0.65 & $-$12.4\% \\
+G: MLP meta & 12.2\% & 0.61 & $-$19.8\% & 11.2\% & 0.61 & $-$12.3\% \\
+F: CMDP-Lagrangian & 8.2\% & 0.37 & $-$18.5\% & 9.4\% & 0.54 & $-$11.0\% \\
+H: MPC & 6.0\% & 0.56 & $-$6.7\% & 6.1\% & 0.64 & \textbf{$-$3.9\%} \\
+RL: Q-learning & 8.3\% & 0.43 & $-$15.0\% & 9.9\% & 0.58 & $-$10.9\% \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -865,169 +876,183 @@ RL: Q-learning & 6.2\% & 10.9\% & 0.23 & $-$15.3\% & 0.41 \\
 \paragraph{Comparison to Passive Benchmark (SPY).}
 As an external calibration point, SPY averages 14.0\% annualized return,
 18.8\% volatility, 0.56 Sharpe, and $-$30.6\% maximum drawdown across the same
-three control-comparison splits. It is not shown as a row in
+three split windows in both universes. It is not shown as a row in
 Table~\ref{tab:metrics} because SPY is a passive benchmark rather than a
-controller applied to the shared alpha engine. In that numerical sense,
-\texttt{D\_plus\_convexity} and plain \texttt{D\_cvar\_robust} are the only
-controllers in the study that clearly exceed SPY on both mean return and mean
-Sharpe, while the meta-control variants are competitive on Sharpe but not on
-mean return.
+controller applied to the shared alpha engine. In Universe A, only the robust
+pair \texttt{D} and \texttt{D+} clearly exceed SPY on both mean return and mean
+Sharpe. In Universe B, plain \texttt{D} roughly matches SPY on mean return
+while exceeding it on Sharpe and drawdown, whereas the council and MPC variants
+exceed SPY on Sharpe and drawdown but not on mean return.
 
-Among the learned methods, \texttt{G\_mlp\_meta} is the closest numerical SPY
-challenger on risk-adjusted terms: it gives up mean return (12.8\% versus
-14.0\%) but improves Sharpe (0.65 versus 0.56) and materially reduces mean
-maximum drawdown ($-$19.7\% versus $-$30.6\%). That makes it a credible learned
-benchmark even though it still trails the robust frontier.
+Among the learned methods, \texttt{E\_council} is now the closest learned SPY
+challenger overall. In Universe B it reaches 11.6\% mean return, 0.65 Sharpe,
+and $-$12.4\% mean maximum drawdown, so it trails SPY on upside but materially
+improves the downside profile. The MLP gate remains competitive, but it does
+not improve on the simpler council in either universe.
 
 \begin{table}[t]
 \centering
 \small
-\caption{D+ versus the passive benchmark SPY across the same three
+\caption{Robust winner versus SPY in each universe across the same three
 control-comparison splits.}
-\label{tab:dplus_spy}
+\label{tab:robust_spy}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{} l r r r @{}}
+\begin{tabular}{@{} l l r r r @{}}
 \toprule
-\textbf{Metric} & \textbf{SPY} & \textbf{D+} & \textbf{$\Delta$(D+--SPY)} \\
+\textbf{Universe} & \textbf{Winner} & \textbf{Return} & \textbf{Sharpe} & \textbf{Max DD} \\
 \midrule
-Annualized return & 14.0\% & 17.8\% & +3.8 pp \\
-Sharpe & 0.56 & 0.85 & +0.29 \\
-Max DD & $-$30.6\% & $-$18.9\% & +11.7 pp \\
+A benchmark & D+: CVaR + convexity & 17.8\% vs 14.0\% & 0.84 vs 0.56 & $-$18.6\% vs $-$30.6\% \\
+B benchmark & D: CVaR-robust & 14.0\% vs 14.0\% & 0.70 vs 0.56 & $-$14.5\% vs $-$30.6\% \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-Table~\ref{tab:dplus_spy} makes the passive comparison explicit. D+ achieves
-higher return and Sharpe than SPY while also reducing drawdown in the evaluated
-setting. The correct claim is not that the paper ``beats SPY'' in general, but
-that \texttt{D\_plus\_convexity} is the strongest point-estimate challenger to
-SPY in this frozen-bundle evaluation. The cached reference-split bootstrap
-against SPY is also supportive on Sharpe ($\Delta \approx +0.45$,
-95\% CI $[0.06, 0.82]$, $p=0.015$), even though the return difference is not
-yet significant at that split. This SPY comparison is economic calibration
-rather than the paper's scientific contribution: the contribution is a
-principled comparison of control mechanisms under shared alpha, timing, and
-cost assumptions.
+Table~\ref{tab:robust_spy} makes the passive comparison explicit. In Universe A,
+\texttt{D+} achieves higher return and Sharpe than SPY while also reducing
+drawdown. In Universe B, plain \texttt{D} is the strongest direct challenger:
+it roughly matches SPY on return, improves Sharpe, and cuts drawdown by more
+than half. The correct claim is not that the paper ``beats SPY'' in general,
+but that the robust family provides the strongest point-estimate SPY challenger
+under the shared control-comparison protocol. This SPY comparison is economic
+calibration rather than the paper's scientific contribution: the contribution
+is a principled comparison of control mechanisms under shared alpha, timing,
+and cost assumptions.
 
-The main answer to \textbf{RQ1} is now more layered than in the earlier draft.
-Among the base controllers, CVaR-aware robust optimization remains the
-strongest non-extension method at 0.81 mean Sharpe. But the best overall
-point-estimate controller in the finished suite is \texttt{D\_plus\_convexity},
-which improves the robust baseline to 0.85 Sharpe and 0.94 Calmar while also
-reducing mean maximum drawdown from $-$26.4\% to $-$18.9\%. The best single run
-in the control-comparison suite, \texttt{D\_plus\_convexity\_tf0.50}, reaches
-21.62\% annualized return with 1.03 Sharpe.
+The main answer to \textbf{RQ1} is now explicitly cross-universe. The robust
+family remains strongest in both universes, but the best robust variant is not
+universal. In Universe A, \texttt{D\_plus\_convexity} is the clear winner at
+0.84 mean Sharpe and 0.95 Calmar, improving markedly on plain \texttt{D}. In
+Universe B, plain \texttt{D\_cvar\_robust} is the strongest point estimate at
+0.70 mean Sharpe, while \texttt{E\_council} and \texttt{H\_mpc} cluster just
+below it near 0.65. The best single run in the entire comparison remains
+\texttt{D\_plus\_convexity\_tf0.50} in Universe A, which reaches 21.4\%
+annualized return with 1.00 Sharpe.
 
 The main answer to \textbf{RQ2} is also positive. Simple rules can provide
-competitive risk control. In particular, regime-aware rules reach Sharpe 0.415
-with maximum drawdown $-$16.1\%, improving on the no-control alpha engine's
-0.402 Sharpe and $-$19.8\% drawdown. Fixed allocation is similarly competitive,
-while vol-targeting offers the best drawdown control among the simple rules at
-the cost of lower return. No single method dominates every risk metric: if
-maximum drawdown is the binding constraint, the conservative rule families are
-still more attractive than the highest-return controllers.
+competitive risk control, but the best simple rule is universe-dependent. In
+Universe A, regime-aware rules reach 0.42 mean Sharpe with $-$15.8\% drawdown,
+improving on the no-control alpha engine's 0.41 Sharpe and $-$19.5\% drawdown.
+In Universe B, fixed exposure slightly edges regime rules on Sharpe
+(0.58 versus 0.55) while keeping drawdown close to $-$11\%. No single method
+dominates every risk metric: if shallow pathwise drawdown is the binding
+constraint, the simple-rule and MPC families remain more attractive than the
+highest-return robust controllers.
 
 The main answer to \textbf{RQ3} is negative for the learning-based methods.
 The learning stack does improve once it is reframed as meta-control rather than
-standalone RL: the MLP meta-controller reaches 0.65 Sharpe and the logistic
-council 0.64, both comfortably above the bandits, supervised controller,
-CMDP-Lagrangian controller, and Q-learning RL. But even those stronger learned
-extensions still trail both plain CVaR-robust at 0.81 and
-\texttt{D\_plus\_convexity} at 0.85. Adding convexity to the meta-controllers
-reduces drawdown modestly but gives back Sharpe, so the evidence favors learned
-gating over learned payoff shaping. LinUCB remains the best non-meta learner at
-0.42 Sharpe, CMDP-Lagrangian reaches 0.35, and tabular Q-learning remains weak
-at 0.23 even after being given a more favorable 75/25 training split in the
-middle evaluation setting.
+standalone RL, but the strongest learned method is now the simpler
+\texttt{E\_council}, not the more expressive MLP gate. The council reaches
+about 0.65 Sharpe in both universes, with the MLP gate close behind at roughly
+0.61. Both comfortably exceed the bandits, supervised controller,
+CMDP-Lagrangian controller, and Q-learning RL in Universe A, while Universe B
+is more forgiving and lifts almost every learned controller. Even so, the
+learning-based methods still trail the robust frontier. Adding convexity to the
+meta-controllers reduces drawdown modestly but gives back Sharpe, so the
+evidence favors learned gating over learned payoff shaping. LinUCB remains the
+best non-meta learner, CMDP-Lagrangian improves materially in Universe B, and
+tabular Q-learning becomes respectable in Universe B without becoming a frontier
+method.
 
-Read as best-in-class representatives, the finished comparison is internally coherent: A4 is the best simple rule, B1 the best non-meta learner, G the best learned controller overall, F the best constrained learner, D the best robust baseline, and D+ the best overall controller. Figure~\ref{fig:control_overview} makes the same pattern visual.
+Read as best-in-class representatives, the finished comparison is internally
+coherent. Universe A's best simple rule is A4, while Universe B's is A1. B1 is
+the best bandit in both universes. E is the best learned controller overall, G
+is the strongest expressive learned gate but not an improvement over E, F is
+the best constrained learner, H is the predictive-control and low-drawdown
+frontier point, D is the most portable robust baseline, and D+ is the peak
+performer when tail asymmetry is strongest. Table~\ref{tab:metrics} carries
+the main cross-universe comparison in the body, while the full plot gallery for
+both universes is collected in Appendix Figures~\ref{fig:control_overview}--
+\ref{fig:mpcdiag}.
 
-The MLP result is therefore not an isolated extra model. It is a boundary
-result. A more expressive learned gate does improve slightly on the logistic
-council (0.65 versus 0.64 Sharpe), which confirms that learning helps most at
-the meta-control layer. It is also the only learned controller numerically
-close to SPY, trailing on mean return but exceeding SPY on mean Sharpe and
-materially reducing drawdown. But that gain is still marginal relative to the
-jump from learned control to the robust stack, so expressive gating does not
-close the gap to explicit risk shaping.
+The MLP result is therefore still valuable, but it becomes a boundary result in
+a different sense than before. A more expressive learned gate no longer
+improves on the simpler council; it merely stays close to it. That confirms
+that learning helps most at the meta-control layer, but also that the major
+performance jump comes from moving from learned control to explicit robust risk
+shaping, not from increasing gate complexity.
 
 One important qualification is statistical rather than economic. The archived
-controller-to-controller bootstrap table compares plain
-\texttt{D\_cvar\_robust} against several alternatives at the reference split.
-Those tests show statistically significant annualized-return advantages versus
-the no-control alpha engine, regime rules, LinUCB, and supervised control, and
-statistically significant Sharpe improvements versus CMDP-Lagrangian and
-Q-learning RL. For the headline extension \texttt{D\_plus\_convexity},
-Table~\ref{tab:dplus_significance} reports the main pairwise comparisons and
-Appendix Table~\ref{tab:dplus_significance_full} reports the complete
-reference-split table against every controller plus SPY.
+controller-to-controller bootstrap tables now need to be read by universe. In
+Universe A, the reference-split tests support \texttt{D+} against the main
+learned and control-theory challengers. In Universe B, plain \texttt{D} is the
+point-estimate winner, but the leading methods are tightly clustered and the
+reference-split bootstrap does not show clean Sharpe separation among
+\texttt{D}, \texttt{D+}, \texttt{E}, and \texttt{H}. Table~\ref{tab:robust_significance}
+reports the key universe-specific comparisons, and Appendix
+Table~\ref{tab:dplus_significance_full} reports the complete reference-split
+pairwise table released with each bundle.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Pairwise significance for D+ versus key baselines at the reference
-split, including the strongest learned controller, using the cached
-block-bootstrap evaluation.}
-\label{tab:dplus_significance}
+\caption{Reference-split Sharpe deltas for the universe-specific robust winner
+against key challengers under the cached block-bootstrap evaluation.}
+\label{tab:robust_significance}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{} l r r r @{}}
+\begin{tabular}{@{} l l r r r @{}}
 \toprule
-\textbf{Comparator} & \textbf{$\Delta$Sharpe} & \textbf{95\% CI} & \textbf{$p$-value} \\
+\textbf{Universe} & \textbf{Comparison} & \textbf{$\Delta$Sharpe} & \textbf{95\% CI} & \textbf{$p$-value} \\
 \midrule
-D: CVaR-robust & +0.12 & [$-$0.08, 0.32] & 0.490 \\
-A4: Regime rules & +0.45 & [0.06, 0.90] & 0.040 \\
-B1: LinUCB & +0.47 & [0.11, 0.90] & 0.010 \\
-G: MLP meta & +0.28 & [0.00, 0.54] & 0.045 \\
-SPY & +0.45 & [0.06, 0.82] & 0.015 \\
+A & D+ -- E: Council & +0.26 & [0.02, 0.51] & 0.025 \\
+A & D+ -- G: MLP meta & +0.33 & [0.01, 0.62] & 0.050 \\
+A & D+ -- H: MPC & +0.44 & [0.08, 0.75] & 0.015 \\
+A & D+ -- D: CVaR-robust & +0.10 & [$-$0.11, 0.32] & 0.705 \\
+B & D -- D+: CVaR + convexity & +0.07 & [$-$0.01, 0.15] & 0.080 \\
+B & D -- E: Council & +0.05 & [$-$0.16, 0.26] & 0.675 \\
+B & D -- H: MPC & $-$0.02 & [$-$0.40, 0.40] & 0.950 \\
+B & D -- SPY & +0.05 & [$-$0.58, 0.60] & 0.980 \\
 \bottomrule
 \end{tabular}}
 \end{table}
 
-Table~\ref{tab:dplus_significance} makes the current statistical picture more
-precise. The convexity-enhanced robust controller is not only the
-point-estimate leader, but it is also statistically superior to regime rules,
-LinUCB, the strongest learned controller \texttt{G\_mlp\_meta}, and SPY on
-Sharpe at the reference split under the cached block-bootstrap. Its edge over
-plain \texttt{D} remains economically positive but not statistically decisive
-on Sharpe. In the full reference-split table released with the artifact bundle,
-D+ is also statistically superior to the factor-only, fixed-allocation,
-vol-target, drawdown-deleveraging, and several other controller baselines on
-Sharpe. The appropriate claim is therefore stronger than in the previous draft:
-\texttt{D\_plus\_convexity} is the point-estimate leader with direct
-statistical support against the main non-CVaR baselines and against the best
-learned controller, while the residual open question is separation from plain
-\texttt{D\_cvar\_robust} itself.
+Table~\ref{tab:robust_significance} makes the current statistical picture more
+precise. In Universe A, the convexity-enhanced robust controller is not only
+the point-estimate leader, but is also statistically superior to the council,
+the MLP gate, and MPC on Sharpe at the reference split. Its edge over plain
+\texttt{D} remains economically positive but not statistically decisive. In
+Universe B, the point-estimate winner is plain \texttt{D}, yet the reference
+split is much tighter: differences versus \texttt{D+}, the council, MPC, and
+SPY are not statistically decisive on Sharpe. The right claim is therefore
+family-level rather than universal: robust risk shaping dominates the design
+space across both universes, but the extra convexity layer is strongly
+supported only where tail asymmetry is pronounced.
 
-The strongest practical insight from the new extensions is that convexity-aware
-payoff shaping directly addresses the earlier CVaR caveat. Plain CVaR-robust
-still has the worst mean maximum drawdown in Table~\ref{tab:metrics} at
-$-$26.4\%, which confirms that CVaR control and realized pathwise drawdown are
-not the same objective. But \texttt{D\_plus\_convexity} reduces that drawdown
-to $-$18.9\% while improving both Sharpe and Calmar, making the convexity layer
-a meaningful refinement rather than a cosmetic add-on. The remaining Pareto
-tension is now between the strongest overall trade-off in \texttt{D+}, the
-cleanest simple-rule protection in A4 and A2, and the more moderate adaptive
-learning behavior of the meta-controller variants.
+The strongest practical insight from the new extensions is now conditional.
+Convexity-aware payoff shaping directly addresses the earlier CVaR caveat in
+Universe A: plain CVaR-robust has the deepest mean drawdown at $-$26.4\%, and
+\texttt{D+} cuts that to $-$18.6\% while improving both Sharpe and Calmar. In
+Universe B, the same convexity layer is milder in its effect: \texttt{D+}
+reduces drawdown only slightly relative to plain \texttt{D} and gives back some
+Sharpe, so the decisive winner becomes plain robust optimization rather than
+the transformed version. The remaining Pareto tension is therefore between the
+return-seeking robust stack in Universe A, the more portable plain-CVaR stack
+in Universe B, and the clean defensive profile of \texttt{H\_mpc}.
 
-\begin{quote}\small\noindent\textbf{Why D+ wins.} (1) $\mathcal{Q}_{\text{CVaR}}$ improves tail-aware portfolio selection. (2) $\mathcal{T}_{\text{convex}}$ repairs the residual pathwise drawdown weakness of plain CVaR. (3) The composition preserves participation while reducing left-tail damage. (4) Learned controllers improve adaptivity, but not enough to replace explicit risk shaping.\end{quote}
+\begin{quote}\small\noindent\textbf{Why the robust family wins.} (1) $\mathcal{Q}_{\text{CVaR}}$ improves tail-aware portfolio selection. (2) $\mathcal{T}_{\text{convex}}$ repairs the residual pathwise drawdown weakness of plain CVaR when left-tail asymmetry is strong. (3) When that asymmetry is milder, plain \texttt{D} and the low-exposure \texttt{H\_mpc} become more competitive. (4) Learned controllers improve adaptivity, but not enough to replace explicit risk shaping.\end{quote}
 
 \paragraph{Regime-conditioned performance.}
-Reference-split regime slices clarify when each control style helps. During the
-2020 crash window (2020-02-19 to 2020-04-30), \texttt{D+} produced +9.0\%
-cumulative return with 1.04 Sharpe, $-$20.0\% maximum drawdown, and mean
-invested fraction $b_t \approx 1.00$, versus plain \texttt{D} at $-$7.1\%,
-$-$0.26, $-$31.2\%, and $b_t \approx 1.00$, and SPY at $-$13.2\%, $-$0.75,
-$-$33.7\%, and $b_t = 1.00$. In the 2021 bull market, both \texttt{D} and
-\texttt{D+} stayed essentially fully invested and captured much of the upside;
-\texttt{D+} delivered +24.7\% cumulative return with 1.58 Sharpe and
-$-$8.0\% maximum drawdown, while SPY remained the strongest pure bull-market
-benchmark at +28.7\%, 2.01, and $-$5.1\%. In the 2022 bear market, the picture
-shifts: A4 regime rules reduced mean invested fraction to 0.87 and achieved
-0.5\% cumulative return with $-$14.7\% maximum drawdown, while \texttt{D+}
-stayed fully invested, lost 5.2\%, and drew down 17.8\%. These slices explain
-why no single method dominates every environment. D+ is strongest on the
-overall trade-off, but regime rules remain attractive when shallow realized
-drawdown is the binding objective.
+Reference-split regime slices clarify why the universe ranking changes. In
+Universe A, both \texttt{D} and \texttt{D+} remain essentially fully invested
+through bull, neutral, and bear regimes at the reference split, but the
+convexity mode intensifies sharply from 0.57 in bull states to 1.79 in bear
+states. Average convexity carry rises from about 1 bp/day in bulls to 3.5
+bp/day in bears, while average convexity benefit rises from roughly 0.5 bp/day
+to 8.9 bp/day. That is exactly the setting in which \texttt{D+} improves on
+plain \texttt{D}: the controller stays participatory while the left-tail
+overlay becomes materially valuable.
+
+Universe B is different. Plain \texttt{D} and \texttt{D+} again stay fully
+invested, but the bear-state convexity benefit at the reference split is only
+about 2.4 bp/day while the bear-state return remains slightly worse for
+\texttt{D+} than for plain \texttt{D}. By contrast, \texttt{H\_mpc} sits near
+35--36\% invested in all three regimes and limits the bear-state annualized
+loss to about $-$6.7\% at 4.3\% volatility. The council remains highly invested
+in both universes but keeps roughly 52--56\% weight on the CVaR expert and
+shifts the residual weight between regime rules and LinUCB. These slices
+explain why no single method dominates every environment: \texttt{D+} is the
+best return-seeking robust controller when tail asymmetry is strong,
+\texttt{D} is the more portable robust baseline, and \texttt{H\_mpc} is the
+cleanest defensive controller when shallow drawdown is the binding objective.
 
 \noindent\textit{Implication for the revised RQs.} \textbf{RQ1}: answered in
 favor of the convexity-enhanced robust stack, with plain CVaR-robust as the
@@ -1036,36 +1061,6 @@ regime-aware rules providing the strongest simple-rule baseline and vol-target
 providing the shallowest drawdowns. \textbf{RQ3}: answered negatively for
 learning-based control; even the learned meta-controllers remain below the best
 optimization-based method.
-
-\IfFileExists{../../results/20260330_033844/control_method_overview.png}{
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/control_method_overview.png}
-\caption{Control-comparison overview of the March 30 frozen-bundle. The four panels rank all controllers by mean Sharpe, summarize return--drawdown trade-offs, report the best method in each controller family, and show Sharpe stability across train fractions. \texttt{D+} leads overall, plain \texttt{D} is the strongest non-extension baseline, and the MLP meta-controller is the strongest learned challenger.}
-\label{fig:control_overview}
-\end{figure*}
-}{
-\noindent\textit{Research note.} When the dedicated research runner is executed,
-it also emits a compact figure summarizing the control comparison.
-}
-
-\IfFileExists{../../results/20260330_033844/control_pareto_frontier.png}{
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/control_pareto_frontier.png}
-\caption{Pareto frontier in return--drawdown space for the finished
-19-controller comparison. No single method dominates every metric. Plain
-\texttt{D\_cvar\_robust} delivers high return but deep drawdown, the simple-rule
-controllers anchor the conservative end of the frontier, and
-\texttt{D\_plus\_convexity} moves the robust optimizer toward a substantially
-better overall trade-off by keeping high return while materially reducing
-drawdown.}
-\label{fig:control_heatmaps}
-\end{figure*}
-}{
-\noindent\textit{Research note.} The plot generator also emits a Pareto-frontier
-view for the control-comparison suite.
-}
 
 \subsection{Legacy Ablation and Complexity Pruning}
 
@@ -1087,36 +1082,24 @@ long-only caps, and group limits, which compresses both return and volatility.
 
 \begin{table*}[t]
 \centering
-\caption{Legacy ablation summary across train/test split settings for the retained pruning suite.}
+\caption{Legacy ablation summary across the retained pruning suite. Universe A
+shows the stronger negative-control effect; Universe B is milder but still
+below the factor core.}
 \label{tab:ablation_summary}
 \begingroup\small
-\begin{tabular}{@{} l r r r r r @{}}
+\begin{tabular}{@{} l r r r r @{}}
 \toprule
-\textbf{Component} & \textbf{Return} & \textbf{Vol.} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
+\textbf{Component} & \textbf{A Sharpe} & \textbf{A Calmar} & \textbf{B Sharpe} & \textbf{B Calmar} \\
 \midrule
-Factor-only benchmark       & 20.2\% & 19.8\% & 0.82 & $-$27.6\% & 0.74 \\
-Alpha stack (fixed weights) & 9.9\%  & 13.4\% & 0.45 & $-$19.4\% & 0.51 \\
-Alpha stack (adaptive)      & 9.2\%  & 13.4\% & 0.40 & $-$19.6\% & 0.46 \\
-Portfolio RL (fixed alpha)  & 7.8\%  & 12.1\% & 0.32 & $-$17.5\% & 0.44 \\
-Full pipeline (fixed alpha) & 7.9\%  & 12.2\% & 0.33 & $-$18.1\% & 0.43 \\
-Full pipeline               & 7.3\%  & 12.0\% & 0.29 & $-$17.4\% & 0.42 \\
+Factor-only benchmark       & 0.82 & 0.74 & 0.71 & 0.99 \\
+Allocator fixed weights     & 0.45 & 0.51 & 0.57 & 0.88 \\
+Alpha stack no RL           & 0.41 & 0.47 & 0.58 & 0.90 \\
+Portfolio RL (fixed alpha)  & 0.36 & 0.49 & 0.44 & 0.77 \\
+Full pipeline               & 0.29 & 0.43 & 0.45 & 0.77 \\
 \bottomrule
 \end{tabular}
 \endgroup
 \end{table*}
-
-\IfFileExists{../../results/20260329_experiments/legacy_pruning_story.png}{
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{../../results/20260329_experiments/legacy_pruning_story.png}
-\caption{Legacy pruning story from the retained ablation suite. The left panel
-orders the old architecture variants by mean Sharpe; the right panel shows the
-pruning path in return-versus-drawdown space. Its role in the revised paper is
-diagnostic: it explains why the study moved away from defending the old RL
-stack and toward a broader control-method comparison.}
-\label{fig:legacy_pruning}
-\end{figure*}
-}{}
 
 \begin{table}[t]
 \centering
@@ -1140,13 +1123,14 @@ Frac. windows full beats SPY on Calmar             & 17\% \\
 \endgroup
 \end{table}
 
-The ablation story remains sharply negative for the old learned stack. Averaged
-across split settings, the factor-only benchmark reaches mean Sharpe 0.82,
-whereas the legacy full pipeline reaches only 0.29. Fixed alpha combination is
-stronger than adaptive combination, and every additional learned layer beyond
-the factor core lowers average Sharpe materially. This is exactly the pruning
-result that motivated the shift from an RL-centric paper to a control-method
-comparison paper.
+The ablation story remains negative for the old learned stack in both
+universes, even though the severity differs. In Universe A, the factor-only
+benchmark reaches mean Sharpe 0.82 while the legacy full pipeline reaches only
+0.29. In Universe B, the factor-only benchmark still leads at 0.71 versus 0.45
+for the legacy full pipeline. Fixed alpha combination is stronger than the
+fully learned branch, and every additional learned layer beyond the factor core
+remains difficult to justify. This is exactly the pruning result that motivated
+the shift from an RL-centric paper to a control-method comparison paper.
 
 \noindent\textit{Implication for RQ3.} The old RL-heavy complexity is not
 justified. The factor core is the credible source of alpha, and the original
@@ -1237,16 +1221,18 @@ The discussion can now be stated more directly. The paper's main contribution is
 
 The experimental results support three conclusions of methodological importance.
 
-First, the control-mechanism comparison has a strongest point-estimate winner.
-\texttt{D\_plus\_convexity} now leads the finished suite, reaching mean Sharpe
-0.85 and Calmar 0.94 versus 0.40 for the no-control alpha engine, 0.42 for the
-best non-meta learner LinUCB, and 0.65 for the strongest learned controller
-\texttt{G\_mlp\_meta}. In other words, once the factor, GARCH,
-and HMM alpha engine is fixed, the biggest incremental value comes from
-explicit downside-aware optimization refined by payoff shaping rather than from
-additional sequential-learning complexity. The layered interpretation also
-matters: plain \texttt{D\_cvar\_robust} remains the strongest non-extension
-baseline, while the convexity layer materially improves its drawdown profile.
+First, the control-mechanism comparison has a strongest family rather than a
+single universal winner. In Universe A, \texttt{D\_plus\_convexity} leads the
+finished suite, reaching mean Sharpe 0.84 and Calmar 0.95 versus 0.41 for the
+no-control alpha engine, 0.42 for the best non-meta learner LinUCB, and 0.65
+for the strongest learned controller \texttt{E\_council}. In Universe B, plain
+\texttt{D\_cvar\_robust} is strongest at 0.70 Sharpe, with the council and
+MPC clustered just below it near 0.65. In other words, once the factor, GARCH,
+and HMM alpha engine is fixed, the biggest incremental value still comes from
+explicit downside-aware optimization rather than from additional
+sequential-learning complexity. The layered interpretation also matters:
+convexity materially improves the robust baseline in Universe A, while plain
+CVaR is the more portable winner in Universe B.
 
 Second, simple rules are stronger than a complexity-first story would suggest.
 Regime-aware rules reach 0.415 mean Sharpe with better maximum drawdown than
@@ -1257,15 +1243,19 @@ control to justify itself, because a disciplined comparison already shows that
 simple rules can be credible, competitive baselines.
 
 Third, the learning-based methods are mixed rather than dominant. LinUCB is the
-best non-meta learner and does slightly improve on the no-control alpha engine,
-but the bandits, supervised controller, CMDP-Lagrangian controller, and
-Q-learning RL all remain well below the robust stack on risk-adjusted
-performance. The positive exception is learned meta-control:
-\texttt{G\_mlp\_meta} reaches 0.65 Sharpe and \texttt{E\_council} 0.64, while
+best non-meta learner and does improve on the no-control alpha engine, but the
+bandits, supervised controller, CMDP-Lagrangian controller, and Q-learning RL
+all remain below the robust stack on risk-adjusted performance. The positive
+exception is learned meta-control: \texttt{E\_council} reaches about 0.65
+Sharpe in both universes and \texttt{G\_mlp\_meta} remains close behind, while
 their convexity-augmented variants give back Sharpe in exchange for somewhat
 shallower drawdowns. That makes meta-control a plausible refinement direction
-even though it still does not unseat \texttt{D+}. That negative result is not an
-embarrassment; it is part of the methodological contribution. The point of the revised paper is to delimit where learning helps and where simpler or more structured controllers remain stronger. Learning contributes most when it is used to arbitrate among already-credible structured controllers rather than to replace financial structure end to end.
+even though it still does not unseat the robust frontier. That negative result
+is not an embarrassment; it is part of the methodological contribution. The
+point of the revised paper is to delimit where learning helps and where
+simpler or more structured controllers remain stronger. Learning contributes
+most when it is used to arbitrate among already-credible structured
+controllers rather than to replace financial structure end to end.
 
 What did not work is therefore just as informative as what did. The old
 RL-heavy stack still collapses in the legacy ablation table. Drawdown-based
@@ -1295,13 +1285,14 @@ selection of safer portfolios is complemented by payoff reshaping in the states
 where plain reweighting still leaves pathwise losses exposed.
 
 The convexity layer then adds selective protection rather than constant
-hedging. In the reference D+ split, the protection mode was inactive on about
-41\% of trading days, mild on about 36\%, and strong on about 23\%. Average
-daily carry was roughly 1.45 bps, average daily payoff benefit was about
-1.89 bps, and the mean net adjustment remained positive. That selectivity is
-exactly what shows up in the crash slice: plain \texttt{D} lost 7.1\% with
-$-$31.2\% drawdown in the 2020 crash window, whereas \texttt{D+} gained 9.0\%
-with $-$20.0\% drawdown over the same dates.
+hedging. In the Universe-A reference split, the protection mode was inactive on
+about 41\% of trading days, mild on about 36\%, and strong on about 23\%.
+Average daily carry was roughly 1.45 bps, average daily payoff benefit was
+about 1.89 bps, and the mean net adjustment remained positive. The regime
+summary sharpens the same point: in Universe A bear states, average convexity
+benefit rises to roughly 8.9 bps/day, whereas in Universe B it is only about
+2.4 bps/day. That difference is exactly why convexity creates a decisive edge
+in one universe but not in the other.
 
 The regime behavior also suggests that the mechanism is not simply binary
 de-risking. Both \texttt{D} and \texttt{D+} stay essentially fully invested in
@@ -1389,23 +1380,26 @@ mixture-of-policies models,
 b_t = \sum_k \pi_k(x_t) b_t^{(k)},
 \]
 which approximates lightweight model averaging over interpretable experts. This
-reduces variance relative to relying on a single learned controller and helps explain why meta-control is the strongest learned family in the paper. The MLP gate analysis makes the mechanism more concrete. In the reference split, the CVaR weight has a +0.29 correlation with realized stress, the LinUCB weight a $-0.32$ correlation, and aggregate gate shifts a +0.61 correlation with regime-belief switches. The gate therefore reacts most around regime transitions by modestly leaning further toward robust control rather than by collapsing to a one-expert policy.
+reduces variance relative to relying on a single learned controller and helps
+explain why meta-control is the strongest learned family in the paper. The MLP
+gate analysis makes the mechanism more concrete. In the Universe-A reference
+split, the CVaR weight has a +0.29 correlation with realized stress, the
+LinUCB weight a $-0.32$ correlation, and aggregate gate shifts a +0.61
+correlation with regime-belief switches. The gate therefore reacts most around
+regime transitions by modestly leaning further toward robust control rather
+than by collapsing to a one-expert policy.
 
-At the same time, the meta-controllers still remain below D+. That gap is
-informative. Variance reduction alone is not enough to match direct
+At the same time, the meta-controllers still remain below the robust frontier.
+That gap is informative. Variance reduction alone is not enough to match direct
 distributional shaping. The logistic council and the MLP gate can learn when to
-lean more heavily on CVaR, rules, or LinUCB, and the MLP gate slightly improves
-on the logistic council (0.65 versus 0.64 mean Sharpe), but neither changes the
-underlying payoff map as directly as D+. In that sense, meta-control is a
-useful refinement layer rather than a replacement for the robust stack. A
-cached ex-post 50/25/25 blend of plain D, A4, and B1 return streams reaches
-about 0.92 mean Sharpe across the three split settings, which is above the
-0.64--0.65 range of the learned gates in Table~\ref{tab:metrics}. So the
-present learned gates are valuable as boundary results, but they do not yet
-outperform a strong static mixture of the same structured experts. That in
-turn sets up the broader control-versus-learning conclusion: learning helps
-most when it arbitrates among strong structured policies, not when it is asked
-to replace explicit risk shaping.
+lean more heavily on CVaR, rules, or LinUCB, but the simpler logistic council
+slightly outperforms the MLP gate in both universes. In that sense,
+meta-control is a useful refinement layer rather than a replacement for the
+robust stack. The present learned gates are valuable as boundary results, but
+they do not close the gap to the best risk-shaping controllers. That in turn
+sets up the broader control-versus-learning conclusion: learning helps most
+when it arbitrates among strong structured policies, not when it is asked to
+replace explicit risk shaping.
 
 \subsection{Control Versus Learning in Noisy Environments}
 
@@ -1420,40 +1414,23 @@ whether adding a dual variable closes the gap between optimization and RL.
 
 The answer from the finished bundle is no. Meta-control is genuinely
 interesting, because it improves materially over the standalone learners and
-the MLP gate is now the best learned method in the paper. But even that result
-still sits below \texttt{D+}, and CMDP-Lagrangian control remains much closer
-to the weaker learning baselines than to the robust frontier. That pattern
-suggests that, for daily portfolio rebalancing under noisy observations,
-directly encoding downside structure is more reliable than trying to learn it
-from the realized return stream. In other words, learning is most useful here
-as meta-control, not as primary control.
+the council/MLP pair marks the strongest learned region of the design space.
+But even that result still sits below the robust frontier, and
+CMDP-Lagrangian control remains much closer to the weaker learning baselines
+than to the best risk-shaping methods. That pattern suggests that, for daily
+portfolio rebalancing under noisy observations, directly encoding downside
+structure is more reliable than trying to learn it from the realized return
+stream. In other words, learning is most useful here as meta-control, not as
+primary control.
 
 \paragraph{Mechanism diagnostic.}
-Figure~\ref{fig:taildiagnostic} gives the cleanest direct evidence for the
-mechanism claim. Relative to both factor-only and plain CVaR, D+ shifts the
+Appendix Figure~\ref{fig:taildiagnostic} gives the cleanest direct evidence for
+the mechanism claim. Relative to both factor-only and plain CVaR, D+ shifts the
 empirical left tail inward at the reference split: the worst-return mass is
 smaller and the 5\% tail summary improves, even though mean return remains close
 to plain D. That pattern is exactly what the risk-shaping framework predicts.
 The improvement is not primarily a forecasting gain; it is a change in how bad
 outcomes are selected and then transformed.
-
-\IfFileExists{../../results/20260330_033844/control_interpretability.png}{
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/control_interpretability.png}
-\caption{Interpretability diagnostics for the revised extensions. Left: shaded 2020-crash and 2022-bear windows show that the reference-split MLP meta-controller remains centered on \texttt{D\_cvar\_robust} while adjusting most around regime transitions. Right: convexity mode usage for \texttt{D\_plus\_convexity} shifts from mostly \texttt{none} in bull states to mostly \texttt{strong} in bear states. Together the panels support the paper's headline mechanism claim: the gains come from state-dependent distribution shaping and expert selection, not from a new predictive signal.}
-\label{fig:interpretability}
-\end{figure*}
-}{}
-
-\IfFileExists{../../results/20260330_033844/control_tail_diagnostic.png}{
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.9\columnwidth]{../../results/20260330_033844/control_tail_diagnostic.png}
-\caption{Left-tail empirical distribution diagnostic for the reference split. Compared with factor-only and plain CVaR, \texttt{D+} shifts the worst-return mass inward and improves the 5\% tail summary while leaving average return roughly unchanged relative to plain \texttt{D}. At the reference split, the D+ layer improves 5\% CVaR by about 30 bps versus plain D, so the improvement is driven primarily by tail-risk reduction rather than by higher average returns alone.}
-\label{fig:taildiagnostic}
-\end{figure}
-}{}
 
 \subsection{When Practitioners Should Use Which Control Style}
 
@@ -1511,17 +1488,17 @@ frequencies, or market microstructure regimes.
 
 The currently reported robustness summary is still based on only six rolling
 windows, five blocked time-series CV folds, and one underlying historical
-sample. The workshop interpretation should therefore be that the robustness
-engine is now part of the methodology, not that robustness has been exhaustively
-established across many independent market environments. At the reference
-split, the D+ significance story is now complete rather than partial: the
-artifact bundle includes 5{,}000-sample block-bootstrap tables for
-\texttt{D\_plus\_convexity} versus every controller baseline plus SPY, and
-those tests show direct Sharpe separation for D+ versus factor-only, regime
-rules, LinUCB, \texttt{G\_mlp\_meta}, and SPY, but not versus plain
-\texttt{D}. What remains future work is an aggregated multi-split or
-multi-window significance analysis, together with equally complete tables for
-the broader meta-controller family.
+sample per universe. The workshop interpretation should therefore be that the
+robustness engine is now part of the methodology, not that robustness has been
+exhaustively established across many independent market environments. At the
+reference split, the universe-specific significance story is now sharper than
+before but still not exhaustive in the strongest sense: Universe A provides
+direct Sharpe separation for \texttt{D+} versus several non-robust baselines
+and both learned meta-controllers, whereas Universe B shows a tighter cluster
+in which plain \texttt{D}, \texttt{D+}, \texttt{E}, and \texttt{H} are not
+cleanly separated on Sharpe. What remains future work is an aggregated
+multi-split or multi-window significance analysis across both universes,
+together with equally complete tables for the broader meta-controller family.
 
 Natural next steps follow directly from this new result. The highest-value
 extensions are broader universes and asset classes, stricter point-in-time data
@@ -1539,15 +1516,27 @@ shared finance-first alpha engine remains modular and interpretable; the main
 scientific question is which controller adds the most value once that engine is
 already in place.
 
-The completed frozen-bundle gives a clear answer. The strongest overall
-point-estimate controller is the convexity-enhanced robust stack
-\texttt{D\_plus\_convexity}; simple regime-aware rules are the best practical
-low-complexity baseline; and the learning-based methods, including CMDP and
-tabular RL, do not beat the best optimization-based approach. D+ is also the
-strongest point-estimate challenger to SPY in the completed bundle, while
-reference-split block-bootstrap already shows Sharpe separation versus
-factor-only, regime rules, LinUCB, and SPY, but not yet decisive Sharpe
-separation versus plain CVaR-robust. Equally importantly, the paper leaves behind a frozen-bundle evaluation protocol that can support future controller comparisons under a consistent empirical standard. In the reported sample, the evidence supports a stronger conceptual claim than the earlier draft: portfolio control is best understood here as risk shaping. Explicitly distribution-aware optimization refined by convexity-aware payoff shaping is the strongest current control layer, while the MLP gate marks the strongest learned challenger and a clear boundary result. The paper does not claim that D+ is universally optimal; it claims that under a fixed finance-first alpha engine and shared experimental protocol, explicit risk shaping dominates the learned alternatives tested here.
+The completed frozen-bundles give a more nuanced but stronger answer. Across
+both universes, the robust family is the clear frontier. The
+convexity-enhanced stack \texttt{D\_plus\_convexity} is the peak performer in
+Universe A, plain \texttt{D\_cvar\_robust} is the most portable robust baseline
+and the winner in Universe B, \texttt{E\_council} is the strongest learned
+controller across both universes, and \texttt{H\_mpc} occupies the cleanest
+low-drawdown frontier point. Simple rules remain credible low-complexity
+baselines, but the learning-based methods, including CMDP and tabular RL, do
+not beat the best optimization-based approach.
+
+Equally importantly, the paper leaves behind a frozen-bundle evaluation
+protocol that can support future controller comparisons under a consistent
+empirical standard. In the reported sample, the evidence supports a stronger
+conceptual claim than the earlier draft: portfolio control is best understood
+here as risk shaping. Explicitly distribution-aware selection dominates the
+learned alternatives across both universes, convex payoff shaping is highly
+valuable when tail asymmetry is strong, and learning contributes most as
+meta-control rather than as the primary decision layer. The paper does not
+claim that \texttt{D+} is universally optimal; it claims that under a fixed
+finance-first alpha engine and shared experimental protocol, explicit risk
+shaping dominates the learned alternatives tested here.
 
 \appendix
 
@@ -1573,7 +1562,7 @@ trying to defend one learned controller in isolation.
 Alpha layer & Factor, GARCH, and HMM sleeves only \\
 Combiner & Adaptive IC-weighted combiner with fixed-weight ablation \\
 Allocator & Long-only, capped, turnover-penalized, factor-anchored target book \\
-Controller candidates & No control, simple rules, ensembles, contextual bandits, supervised control, CVaR-robust, CVaR + convexity, council meta-control, council + convexity, MLP meta-control, MLP meta-control + convexity, CMDP-Lagrangian, and Q-learning RL \\
+Controller candidates & No control, simple rules, ensembles, contextual bandits, supervised control, CVaR-robust, CVaR + convexity, council meta-control, council + convexity, MLP meta-control, MLP meta-control + convexity, CMDP-Lagrangian, MPC, and Q-learning RL \\
 Execution & No-trade band plus three-part transaction-cost model \\
 Legacy reference branch & RL-heavy full pipeline, PPO comparator, and pruning ablations retained as negative-reference evidence \\
 \bottomrule
@@ -1582,8 +1571,10 @@ Legacy reference branch & RL-heavy full pipeline, PPO comparator, and pruning ab
 
 \subsection{Research Artifacts}
 
-For the revised timestamped bundle discussed in the paper, the research runner
-writes the artifacts below into \texttt{results/20260330\_033844/}:
+For the revised timestamped bundles discussed in the paper, the research runner
+writes the artifacts below into
+\texttt{results/20260330\_221820\_universe\_A/} and
+\texttt{results/20260331\_002747\_universe\_B/}:
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \texttt{research\_metrics.csv}: tabular output for ablation and robustness runs;
 \item \texttt{research\_control\_comparison.csv}: split-aggregated controller comparison across the 19 evaluated methods;
@@ -1593,17 +1584,14 @@ writes the artifacts below into \texttt{results/20260330\_033844/}:
 \item \texttt{research\_rolling\_references.csv}: rolling benchmark metrics for SPY and the factor-only benchmark;
 \item \texttt{research\_bootstrap\_cis.csv}: block-bootstrap confidence intervals for key strategy metrics;
 \item \texttt{research\_bootstrap\_significance.csv}: legacy-full-pipeline bootstrap deltas versus benchmark strategies;
-\item \texttt{research\_control\_significance.csv}: complete reference-split D+-versus-controller bootstrap deltas, including SPY;
-\item \texttt{research\_control\_significance\_full.csv}: full controller-significance table for the current bundle;
-\item \texttt{research\_control\_significance\_dplus.csv}: D+-centered slice of that table for direct manuscript use;
+\item \texttt{research\_control\_significance.csv}: complete reference-split robust-winner-versus-controller bootstrap deltas, including SPY;
 \item \texttt{research\_jobson\_korkie.csv}: parametric Sharpe-ratio comparison tests;
 \item \texttt{research\_ts\_cv.csv}: blocked time-series cross-validation summaries;
-\item \texttt{research\_meta\_blend\_sanity.csv}: cached 50/25/25 fixed-blend sanity check versus the learned meta-controllers;
-\item \texttt{research\_mlp\_gate\_diagnostics.csv}: MLP gate stress, switch, and regime diagnostics;
 \item \texttt{research\_summary.json}: serialized configuration and best-per-suite summaries;
 \item \texttt{control\_method\_overview.png}: main paper figure summarizing controller ranking, trade-offs, and split stability;
 \item \texttt{control\_pareto\_frontier.png}: Pareto-frontier view of return versus drawdown;
 \item \texttt{control\_interpretability.png}: MLP gate and convexity activation diagnostic figure;
+\item \texttt{control\_mpc\_diagnostic.png}: invested-target and stabilizer-mix diagnostic for MPC;
 \item \texttt{control\_tail\_diagnostic.png}: left-tail diagnostic comparing factor-only, plain D, and D+;
 \item \texttt{pipeline\_rolling\_windows.png}: appendix-only rolling-window diagnostic for the legacy branch; and
 \item \texttt{pipeline\_reward\_ablation.png}: reward-ablation figure.
@@ -1613,31 +1601,32 @@ writes the artifacts below into \texttt{results/20260330\_033844/}:
 \begin{table*}[t]
 \centering
 \small
-\caption{Complete reference-split pairwise significance table for \texttt{D+} versus every controller plus SPY (Sharpe deltas).}
+\caption{Complete Universe-A reference-split pairwise significance table for
+\texttt{D+} versus every controller plus SPY (Sharpe deltas).}
 \label{tab:dplus_significance_full}
 \begin{tabular}{@{} l r r r @{}}
 \toprule
 \textbf{Comparator} & \textbf{$\Delta$Sharpe} & \textbf{95\% CI} & \textbf{$p$-value} \\
 \midrule
-No control (alpha engine) & +0.48 & [+0.13, +0.90] & 0.025 \\
-A1: Fixed & +0.48 & [+0.08, +0.88] & 0.015 \\
-A2: Vol-target & +0.59 & [+0.17, +1.08] & 0.000 \\
-A3: DD-Delever & +0.67 & [+0.20, +1.16] & 0.000 \\
-A4: Regime rules & +0.45 & [+0.06, +0.90] & 0.040 \\
-A5: Ensemble (mean) & +0.56 & [+0.16, +1.01] & 0.005 \\
-A5: Ensemble (min) & +0.63 & [+0.19, +1.10] & 0.005 \\
-B1: LinUCB & +0.47 & [+0.11, +0.90] & 0.010 \\
-B2: Thompson & +0.58 & [+0.15, +0.99] & 0.000 \\
-B3: Eps-greedy & +0.51 & [+0.13, +0.91] & 0.010 \\
-C: Supervised & +0.47 & [+0.08, +0.84] & 0.025 \\
-D: CVaR-robust & +0.12 & [-0.08, +0.32] & 0.490 \\
-E: Council & +0.26 & [-0.00, +0.49] & 0.060 \\
-E+: Council + convexity & +0.25 & [+0.05, +0.45] & 0.025 \\
-G: MLP meta & +0.28 & [+0.00, +0.54] & 0.045 \\
-G+: MLP meta + convexity & +0.24 & [+0.02, +0.43] & 0.015 \\
-F: CMDP-Lagrangian & +0.56 & [+0.16, +0.98] & 0.010 \\
-RL: Q-learning & +0.72 & [-0.06, +1.52] & 0.055 \\
-SPY & +0.45 & [+0.06, +0.82] & 0.015 \\
+No control (alpha engine) & +0.45 & [+0.00, +0.94] & 0.050 \\
+A1: Fixed & +0.45 & [$-$0.01, +0.92] & 0.065 \\
+A2: Vol-target & +0.55 & [+0.05, +1.11] & 0.020 \\
+A3: DD-Delever & +0.64 & [+0.15, +1.14] & 0.035 \\
+A4: Regime rules & +0.41 & [$-$0.06, +0.96] & 0.110 \\
+A5: Ensemble (mean) & +0.53 & [+0.07, +1.05] & 0.025 \\
+B1: LinUCB & +0.53 & [+0.10, +1.01] & 0.015 \\
+B2: Thompson & +0.61 & [+0.24, +1.04] & 0.005 \\
+B3: Eps-greedy & +0.64 & [+0.22, +1.07] & 0.000 \\
+C: Supervised & +0.54 & [+0.10, +0.96] & 0.015 \\
+D: CVaR-robust & +0.10 & [$-$0.11, +0.32] & 0.705 \\
+H: MPC & +0.44 & [+0.08, +0.75] & 0.015 \\
+E: Council & +0.26 & [+0.02, +0.51] & 0.025 \\
+E+: Council + convexity & +0.25 & [+0.05, +0.47] & 0.015 \\
+G: MLP meta & +0.33 & [+0.01, +0.62] & 0.050 \\
+G+: MLP meta + convexity & +0.39 & [+0.14, +0.59] & 0.000 \\
+F: CMDP-Lagrangian & +0.60 & [+0.12, +1.06] & 0.005 \\
+RL: Q-learning & +0.25 & [$-$0.49, +1.19] & 0.520 \\
+SPY & +0.41 & [$-$0.02, +0.88] & 0.065 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1650,26 +1639,177 @@ context after the fact.
 
 \subsection{Supplementary Diagnostic Figures}
 
-These figures are diagnostic and illustrative, but the primary evidentiary claims of the paper now rest on Tables~\ref{tab:metrics}--\ref{tab:legacy_bootstrap_significance} and Figures~\ref{fig:control_overview}, \ref{fig:control_heatmaps}, \ref{fig:legacy_pruning}, \ref{fig:interpretability}, and \ref{fig:taildiagnostic}. The appendix intentionally keeps the rolling-window figure as a legacy robustness supplement rather than a main-text result.
+All result plots are collected in the appendix so the main body can remain
+table-driven and easier to scan. Universe A and Universe B are shown side by
+side wherever possible, with the legacy diagnostics retained at the end as
+supporting context rather than primary evidence.
 
-
-\IfFileExists{../../results/20260330_033844/pipeline_rolling_windows.png}{
+\IfFileExists{../../results/20260330_221820_universe_A/control_method_overview.png}{
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/pipeline_rolling_windows.png}
-\caption{Appendix-only rolling-window robustness diagnostic for the retained legacy full pipeline. The pattern remains mixed: drawdown improves more often than Sharpe, and the windows should be interpreted as internal robustness slices from one historical sample rather than independent replications.}
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/control_method_overview.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/control_method_overview.png}
+\end{minipage}
+\caption{Control-method overview plots for the two archived universes. Left:
+Universe A, where \texttt{D\_plus\_convexity} is the flagship performer.
+Right: Universe B, where the robust frontier is tighter and plain
+\texttt{D\_cvar\_robust} leads on mean Sharpe.}
+\label{fig:control_overview}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/control_split_heatmaps.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/control_split_heatmaps.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/control_split_heatmaps.png}
+\end{minipage}
+\caption{Split-stability heatmaps for the control-comparison suite in the two
+universes. These plots summarize how controller rankings change across the
+three train-fraction splits.}
+\label{fig:split_heatmaps}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/control_pareto_frontier.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/control_pareto_frontier.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/control_pareto_frontier.png}
+\end{minipage}
+\caption{Pareto frontiers in return--drawdown space for the two archived
+universes. Universe A shows the strongest outward push from
+\texttt{D\_plus\_convexity}; Universe B is tighter, with plain
+\texttt{D\_cvar\_robust}, \texttt{E\_council}, and \texttt{H\_mpc} clustering
+near the defensive frontier.}
+\label{fig:control_heatmaps}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/control_interpretability.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/control_interpretability.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/control_interpretability.png}
+\end{minipage}
+\caption{Interpretability diagnostics for the reference split in both
+universes. The left panel in each image shows how the learned gate reallocates
+weight across experts through time; the right panel shows convexity mode usage
+by regime.}
+\label{fig:interpretability}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/control_tail_diagnostic.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=0.95\linewidth]{../../results/20260330_221820_universe_A/control_tail_diagnostic.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=0.95\linewidth]{../../results/20260331_002747_universe_B/control_tail_diagnostic.png}
+\end{minipage}
+\caption{Left-tail empirical distribution diagnostics for the reference split in
+both universes. In Universe A, \texttt{D+} visibly improves the worst-return
+mass relative to plain \texttt{D}; in Universe B, the tail improvement is
+smaller, matching the tighter D-versus-D+ ranking in the tables.}
+\label{fig:taildiagnostic}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/control_mpc_diagnostic.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/control_mpc_diagnostic.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/control_mpc_diagnostic.png}
+\end{minipage}
+\caption{MPC diagnostics for the reference split in both universes. The plots
+show planned versus realized invested fraction, stabilizer mix, and stress
+annotations, clarifying why \texttt{H\_mpc} sits on the low-drawdown frontier.}
+\label{fig:mpcdiag}
+\end{figure*}
+}{}
+
+\IfFileExists{../../results/20260330_221820_universe_A/legacy_pruning_story.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/legacy_pruning_story.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/legacy_pruning_story.png}
+\end{minipage}
+\caption{Legacy pruning-story diagnostics for Universes A and B. These remain
+useful as historical negative-reference evidence showing why the paper moved
+away from the old RL-heavy stack.}
+\label{fig:legacy_pruning}
+\end{figure*}
+}{}
+
+
+\IfFileExists{../../results/20260330_221820_universe_A/pipeline_rolling_windows.png}{
+\begin{figure*}[t]
+\centering
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/pipeline_rolling_windows.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/pipeline_rolling_windows.png}
+\end{minipage}
+\caption{Rolling-window robustness diagnostics for the retained legacy full
+pipeline in both universes. The pattern remains mixed, and the windows should
+be interpreted as internal robustness slices from one historical sample rather
+than independent replications.}
 \label{fig:rollingwindows}
 \end{figure*}
 }{}
 
-\IfFileExists{../../results/20260330_033844/pipeline_reward_ablation.png}{
+\IfFileExists{../../results/20260330_221820_universe_A/pipeline_reward_ablation.png}{
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{../../results/20260330_033844/pipeline_reward_ablation.png}
-\caption{Supplementary reward-ablation figure for the revised bundle. Reward
-choice changes the controller's operating point modestly, but the broader
-ranking versus the factor-only benchmark and the strongest rule-based overlays
-is unchanged.}
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260330_221820_universe_A/pipeline_reward_ablation.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../../results/20260331_002747_universe_B/pipeline_reward_ablation.png}
+\end{minipage}
+\caption{Reward-ablation figures for the revised bundle in both universes.
+Reward choice moves the legacy controller within a narrow band, but does not
+change the broader ranking versus the factor core and the strongest robust
+controllers.}
 \label{fig:rewardfig}
 \end{figure*}
 }{}
