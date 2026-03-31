@@ -1,101 +1,125 @@
 # Quant Paper Lab
 
-This repository contains a research-oriented portfolio-management system and the paper artifacts built around it.
+Research code and paper artifacts for **Systematic Evaluation of Control Mechanisms for Factor-Based Portfolio Management**.
 
-The project started as an RL-heavy modular trading pipeline and then pivoted, based on archived negative results, into a broader comparison of control mechanisms on top of a finance-first alpha engine. The current codebase supports both that legacy branch and the revised control-comparison study.
+Public repository:
+- <https://github.com/ioan-hedea/quant-paper-lab>
 
-## Project Focus
+This project began as an RL-heavy modular trading prototype and evolved into a broader, more disciplined study of **portfolio control as risk shaping** on top of a finance-first alpha engine. The current repository contains:
 
-The current paper direction is:
+- the active two-universe research code
+- checkpointed frozen-bundle evaluations
+- paper-ready figures and tables
+- the one-column and two-column manuscript sources and PDFs
 
-- finance-first alpha generation
-- systematic comparison of control layers
-- frozen-bundle evaluation and checkpointed research artifacts
-- transparent treatment of negative results
+## Current Paper Claim
 
-The revised control study asks:
+The current paper is no longer an “RL paper.” Its central claim is:
 
-1. Which control mechanism adds the most value on top of a strong alpha engine?
-2. Can simple rules provide competitive downside control?
-3. Do learning-based methods beat optimization-based methods?
+> Portfolio control can be understood as **risk shaping**. In the reported frozen bundle, explicit downside-aware optimization dominates the learned alternatives, convex payoff shaping is highly valuable when tail asymmetry is strong, and learning contributes most as **meta-control** rather than as the primary decision layer.
 
-In the current archived story, no single method dominates every metric:
+The latest archived manuscript evidence is based on **two disjoint equity universes**:
 
-- `D_cvar_robust` is strongest on Sharpe-based point estimates
-- `A4_regime_rules` is strongest on drawdown protection among the top candidates
-- simple rules remain competitive
-- tabular RL is a weak comparator in this setting
+- `Universe A`: 77 tickers
+- `Universe B`: 75 tickers with zero overlap with A
 
-## Current Architecture
+Both are evaluated on daily data from **2013-04-02 through 2026-03-30**.
 
-The active research stack is defined in [architecture_revision_v2.md](architecture_revision_v2.md).
+## Current Empirical Picture
 
-### 1. Alpha Layer
+The finished two-universe bundle supports a nuanced but clean story:
+
+- the **robust family** is the overall frontier across both universes
+- `D_plus_convexity` is the strongest overall controller in **Universe A**
+- plain `D_cvar_robust` is the strongest and more portable robust baseline in **Universe B**
+- `E_council` is the strongest learned controller across both universes
+- `G_mlp_meta` is the strongest expressive learned gate, but does not improve on `E_council`
+- `H_mpc` is the strongest low-drawdown / defensive frontier point
+- tabular RL remains a negative or secondary reference, not the recommended controller
+
+In short:
+
+- **optimization wins**
+- **convexity helps when left-tail asymmetry is strong**
+- **learning helps most as meta-control**
+
+## Active Architecture
+
+The active study design is summarized in [architecture_revision_v2.md](architecture_revision_v2.md).
+
+### Alpha Layer
+
+The alpha engine is intentionally finance-first:
 
 - cross-sectional factor model
-- GARCH volatility forecasts
-- 2-state HMM regime belief
-- adaptive signal combiner
+- GARCH volatility sleeve
+- 2-state HMM regime sleeve
+- adaptive IC-weighted alpha combiner
 
-This is a finance-first alpha engine. Pairs, LSTM sleeves, and hedge RL were removed from the main path because the archived ablations did not justify them.
+Pairs, LSTM sleeves, and hedge RL remain in the repo only as legacy or negative-reference context, not as the main paper path.
 
-### 2. Allocator
+### Allocator
 
-- long-only constrained optimizer
-- capped weights
-- turnover penalty
-- factor-anchored target book
+The intermediate allocator turns alpha into a constrained target book:
+
+- long-only
+- capped positions
+- turnover-penalized
+- group-aware
+- factor-anchored
 - no-trade band
-- 3-part transaction cost model
+- three-part transaction-cost model
 
-### 3. Control Candidates
+### Control Layer
 
-Implemented controller families include:
+Implemented controller families currently include:
 
-- `none`: no control over the shared alpha engine
+- `none`: no additional control beyond the shared alpha engine
 - `fixed`: fixed invested fraction
 - `vol_target`: volatility targeting
 - `dd_delever`: drawdown-based deleveraging
-- `regime_rules`: regime-aware exposure rules
+- `regime_rules`: regime-conditioned rules
 - `ensemble_rules`: simple rule ensemble
 - `linucb`, `thompson`, `epsilon_greedy`: contextual bandits
-- `supervised`: offline-learned exposure classifier
+- `supervised`: offline-trained control policy
 - `cvar_robust`: CVaR-aware robust optimization
-- `council`: small expert-gated meta-controller
-- `cmdp_lagrangian`: simple constrained-MDP style controller
+- `council`: logistic expert-gated meta-controller
+- `mlp_meta`: PyTorch MLP/attention-gated meta-controller
+- `mpc`: model-predictive control
+- `cmdp_lagrangian`: constrained-MDP style controller
 - `q_learning`: tabular RL controller
-- `ppo`: end-to-end RL baseline
+- `ppo`: end-to-end PPO baseline
 
-The extension layer also supports:
+Extensions built on top of strong baselines:
 
 - convexity-aware payoff shaping
-- council + convexity combinations
-
-These are intended as extensions of the strong robust baseline, not replacements for it.
+- council + convexity
+- MLP meta + convexity
 
 ## Repository Layout
 
-- `quant_stack/`: main research package
-  - `config.py`: all experiment and controller configuration
+- `quant_stack/`
+  - `config.py`: experiment grids, universes, controller configs, checkpoint settings
   - `data.py`: market, macro, and SEC enrichment
-  - `alpha.py`: factor, GARCH, and regime logic
-  - `controllers.py`: rule, bandit, supervised, robust, council, CMDP, and RL controllers
-  - `pipeline.py`: end-to-end backtest engine
-  - `evaluation.py`: checkpointed research suite and artifact generation
-  - `plots.py`: legacy and paper-facing plots
-- `quant_pipeline.py`: single pipeline / strategy run
-- `quant_research.py`: full evaluation driver
-- `scripts/bootstrap_venv.sh`: environment bootstrap
-- `scripts/generate_control_story_plots.py`: higher-level paper plots from saved CSV artifacts
-- `paper/1col/`: single-column paper source and PDF
-- `paper/2col/`: two-column paper source, auto-generated tables, and PDF
-- `checkpoints/research_runs/`: per-run checkpoint cache
-- `logs/`: experiment logs
-- `research_*.csv`, `research_*.json`: root-level summary artifacts
+  - `alpha.py`: factor, GARCH, and HMM alpha sleeves
+  - `controllers.py`: rules, bandits, supervised, robust, council, MLP meta, MPC, CMDP, and RL controllers
+  - `pipeline.py`: shared walk-forward backtest engine
+  - `evaluation.py`: research suite, checkpoints, statistics, and artifact generation
+  - `plots.py`: pipeline-level plotting helpers
+  - `main.py`: one-off pipeline entrypoint
+- `quant_pipeline.py`: thin wrapper for a single pipeline run
+- `quant_research.py`: full research runner
+- `scripts/generate_control_story_plots.py`: paper-facing plot generation from archived results bundles
+- `paper/1col/`: one-column manuscript source and PDF
+- `paper/2col/`: two-column manuscript source, generated tables, and PDF
+- `checkpoints/research_runs/universe_A/`: Universe A cached run PKLs and progress manifest
+- `checkpoints/research_runs/universe_B/`: Universe B cached run PKLs and progress manifest
+- `results/`: timestamped research bundles
+- `logs/`: timestamped run logs
 
 ## Environment Setup
 
-### Option A: Standard venv
+### Option A: Standard `venv`
 
 ```bash
 python3 -m venv .venv
@@ -104,7 +128,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-e2e.txt
 ```
 
-`requirements-e2e.txt` already includes `requirements.txt`, so you usually only need the one install command above.
+`requirements-e2e.txt` already includes `requirements.txt`.
 
 ### Option B: Bootstrap Script
 
@@ -112,9 +136,7 @@ python -m pip install -r requirements-e2e.txt
 bash scripts/bootstrap_venv.sh --with-e2e
 ```
 
-### Option C: uv
-
-If you prefer `uv`:
+### Option C: `uv`
 
 ```bash
 uv venv
@@ -122,13 +144,11 @@ source .venv/bin/activate
 uv pip install -r requirements-e2e.txt
 ```
 
-## Environment Variables
+## Useful Environment Variables
 
-Optional but useful:
-
-- `FRED_API_KEY`: enables higher-quality macro feature loading
+- `FRED_API_KEY`: enables better macro-data retrieval
 - `SEC_USER_AGENT`: enables SEC company-facts enrichment
-- `MPLCONFIGDIR=/tmp/matplotlib`: avoids Matplotlib cache permission issues in some environments
+- `MPLCONFIGDIR=/tmp/matplotlib`: avoids Matplotlib cache permission problems
 
 Example:
 
@@ -141,91 +161,99 @@ python quant_research.py
 
 ## Running the Code
 
-### Single Pipeline Run
+### 1. Single Pipeline Run
 
 ```bash
 source .venv/bin/activate
 MPLCONFIGDIR=/tmp/matplotlib python quant_pipeline.py
 ```
 
-This produces a one-off backtest plus diagnostic plots such as:
+This runs a single end-to-end backtest on the default active universe and writes pipeline-level plots in the repository root, including:
 
 - `pipeline_alpha_models.png`
 - `pipeline_performance.png`
 - `pipeline_rl_analysis.png`
 - `pipeline_execution_rl.png`
 
-### Full Research Evaluation
+### 2. Full Research Evaluation
 
 ```bash
 source .venv/bin/activate
 MPLCONFIGDIR=/tmp/matplotlib python quant_research.py
 ```
 
-This runs the checkpointed research suite:
+By default, this now runs:
 
-- legacy ablations
-- control-method comparison
-- strict-timing discipline check
-- rolling-window robustness
-- cost sensitivity
-- rebalance sensitivity
-- macro-lag sensitivity
-- reward ablation
+1. the full frozen-bundle research suite for **Universe A**
+2. the full frozen-bundle research suite for **Universe B**
+3. a cross-universe transfer / meta-learning evaluation over the controller results
 
-The wrapper prints the key generated artifacts when it completes.
+The runner prints the output bundle path for each universe and for the transfer stage.
 
-### Plot Refresh Only
-
-If the CSV artifacts already exist and you only want the higher-level summary plots:
+### 3. Plot Refresh from an Existing Results Bundle
 
 ```bash
 source .venv/bin/activate
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib python scripts/generate_control_story_plots.py
 ```
 
-This regenerates:
+This regenerates the higher-level paper figures inside the selected or latest results bundle, including:
 
 - `control_method_overview.png`
 - `control_split_heatmaps.png`
 - `control_pareto_frontier.png`
+- `control_interpretability.png`
+- `control_mpc_diagnostic.png`
+- `control_tail_diagnostic.png`
 - `legacy_pruning_story.png`
 
-## Checkpoints and Artifact Reuse
+### 4. Rebuild the Paper PDFs
 
-The research engine is designed to reuse checkpointed runs aggressively.
+One-column:
 
-- per-run results are stored in `checkpoints/research_runs/*.pkl`
-- progress is tracked in `checkpoints/research_runs/research_progress.json`
-- checkpoint compatibility is based on canonicalized config metadata
-- unchanged runs are loaded from cache instead of recomputed
+```bash
+cd paper/1col
+pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report.tex
+pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report.tex
+```
 
-This is especially useful when:
+Two-column:
 
-- you add a new controller candidate
-- you tweak paper-facing summaries or plots
-- you rerun after a partial interruption
+```bash
+cd paper/2col
+pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report_2col.tex
+pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report_2col.tex
+```
 
-Recent examples of extension-only labels include:
+## Universes
 
-- `D_plus_convexity`
-- `E_council`
-- `E_plus_convexity`
-- `F_cmdp_lagrangian`
+Universe handling is now a first-class part of the repo.
 
-If a new experiment only adds one of those labels, the older controller checkpoints should still be reused.
+- `quant_stack.config.get_universe_profile('A'|'B')` returns the full universe definition
+- `quant_stack.config.use_universe('A'|'B')` temporarily swaps the active universe across the main modules
+- `quant_research.py` uses that mechanism internally so both universes run through the same code path
 
-### Q-Learning Split Note
+The current paper bundles use:
 
-The tabular Q-learning controller is now scheduled with a `75/25` split in place of the old `50/50` split inside the control comparison grid. Other controller families keep the shared `(0.4, 0.5, 0.6)` train-fraction schedule.
+- `results/20260330_221820_universe_A/`
+- `results/20260331_002747_universe_B/`
 
-## Main Research Artifacts
+## Results and Artifact Layout
 
-Core tabular outputs:
+Each primary research run writes a timestamped per-universe bundle:
+
+- `results/<timestamp>_universe_A/`
+- `results/<timestamp>_universe_B/`
+
+Cross-universe transfer writes:
+
+- `results/<timestamp>_transfer_A-B/`
+
+Typical per-universe outputs include:
 
 - `research_metrics.csv`
-- `research_ablation_summary.csv`
 - `research_control_comparison.csv`
+- `research_ablation_summary.csv`
 - `research_robustness_summary.csv`
 - `research_regime_summary.csv`
 - `research_rolling_references.csv`
@@ -235,24 +263,71 @@ Core tabular outputs:
 - `research_jobson_korkie.csv`
 - `research_ts_cv.csv`
 - `research_summary.json`
-
-Core figures:
-
-- `pipeline_research_eval.png`
-- `pipeline_reward_ablation.png`
-- `pipeline_rolling_windows.png`
+- `research_paper_tables.tex`
 - `control_method_overview.png`
 - `control_split_heatmaps.png`
 - `control_pareto_frontier.png`
+- `control_interpretability.png`
+- `control_mpc_diagnostic.png`
+- `control_tail_diagnostic.png`
 - `legacy_pruning_story.png`
+- `pipeline_rolling_windows.png`
+- `pipeline_reward_ablation.png`
 
-Paper-support artifact:
+Typical transfer outputs include:
 
-- `paper/2col/research_paper_tables.tex`
+- `meta_learning_dataset.csv`
+- `meta_learning_transfer.json`
+
+## Checkpoints and Reuse
+
+Checkpoint reuse is a core part of the workflow.
+
+Current layout:
+
+- `checkpoints/research_runs/universe_A/`
+- `checkpoints/research_runs/universe_B/`
+
+Key properties:
+
+- checkpoints are stored per run as `.pkl`
+- progress manifests are now universe-local
+- checkpoint lookup is backward-compatible with older naming schemes
+- the default match mode is `compatible`, not brittle exact equality
+
+That means old results are still reused when the important parts are unchanged:
+
+- same universe
+- same controller / experiment
+- same effective suite
+- same ticker columns
+- same macro feature set
+
+Small patch-level metadata changes or tiny trailing-date drifts no longer destroy checkpoint reuse unnecessarily.
+
+## Cross-Universe Transfer / Meta-Learning
+
+The repo now includes a transfer-style evaluation layer over controller behavior.
+
+Implemented pieces:
+
+- environment-level feature extraction from completed runs
+- environment × controller dataset assembly
+- cross-environment controller-transfer evaluation
+
+Reported transfer outputs include:
+
+- Kendall’s tau for ranking transfer
+- top-1 / top-2 accuracy
+- average regret
+
+This is intended to support the broader question:
+
+> can environment-aware meta-selection learn which controller family is best in a new setting?
 
 ## Paper Files
 
-Main manuscript sources:
+Main sources:
 
 - [paper/1col/quant_pipeline_report.tex](paper/1col/quant_pipeline_report.tex)
 - [paper/2col/quant_pipeline_report_2col.tex](paper/2col/quant_pipeline_report_2col.tex)
@@ -262,46 +337,66 @@ Built PDFs:
 - [paper/1col/quant_pipeline_report.pdf](paper/1col/quant_pipeline_report.pdf)
 - [paper/2col/quant_pipeline_report_2col.pdf](paper/2col/quant_pipeline_report_2col.pdf)
 
-The paper currently presents:
+The two-column paper is the main submission-style version.
 
-- the frozen-bundle evaluation protocol as the methodological contribution
-- the control-method comparison as the empirical contribution
+## Reproducibility
+
+The methodological contribution of the repo is the **frozen-bundle** workflow:
+
+- shared alpha engine
+- shared timing contract
+- shared cost assumptions
+- archived result bundles
+- checkpointed reruns
+- paper tables generated from the same archived outputs
+
+The intent is not to make trading claims from ad hoc plots. It is to make controller comparisons reproducible under a shared empirical contract.
 
 ## Data Sources
 
-- prices and volumes: `yfinance`
-- macro series: FRED when available, with fallbacks for core public macro inputs
-- SEC fundamentals: company-facts enrichment when `SEC_USER_AGENT` is provided
+- market prices and volumes: `yfinance`
+- macro series: FRED when available
+- SEC enrichment: company-facts API when `SEC_USER_AGENT` is set
+
+These sources are convenient and reproducible, but they are still research-grade rather than full institutional point-in-time data feeds.
 
 ## Licensing
 
-This repository now uses a simple split-license setup:
+The repo uses a split-license setup:
 
 - code: [LICENSE](LICENSE) (`MIT`)
 - paper text, documentation, and repo-authored figures: [LICENSE-docs](LICENSE-docs) (`CC BY 4.0`)
-- additional notes and exclusions: [NOTICE](NOTICE)
+- exclusions and notes: [NOTICE](NOTICE)
 
 Important:
 
-- external market, macro, and SEC data are not automatically relicensed by this repository
-- installed third-party packages keep their own licenses
-- generated artifacts may contain provider-derived data, so redistribution should still respect upstream data terms
+- external data are not relicensed by this repository
+- third-party dependencies keep their own licenses
+- generated artifacts derived from upstream data still need to respect provider terms
 
-## Important Caveats
+## Caveats
 
 - This is research code, not production trading infrastructure.
-- Backtests are sensitive to cost assumptions, split design, and universe definition.
-- Some artifact files in the repo root are snapshots from previous experiment bundles; the paper should always be aligned with the latest frozen bundle you intend to report.
-- The legacy RL-heavy branch is kept for transparency and negative-result analysis, not because it is the recommended architecture.
+- Results are sensitive to universe design, transaction-cost assumptions, and evaluation splits.
+- The robust family is strongest in the current frozen bundle, but the repo does **not** claim universal optimality.
+- The legacy RL-heavy branch is retained for transparency and negative-result analysis, not as the recommended architecture.
 
 ## Recommended Workflow
 
-For everyday work, the simplest sequence is:
+For day-to-day work:
 
-1. Update code or experiment configs.
-2. Run `quant_research.py` and let checkpoint reuse skip old runs.
-3. Regenerate the control-story plots if needed.
-4. Update the paper sources in `paper/1col/` and `paper/2col/`.
-5. Rebuild the PDFs.
+1. Make the code or config change.
+2. Run `quant_research.py`.
+3. Let checkpoint reuse skip unchanged runs.
+4. Regenerate the plot bundle if needed.
+5. Update the manuscript.
+6. Rebuild the PDFs.
 
-If the study direction changes, update [architecture_revision_v2.md](architecture_revision_v2.md) first, then align code, artifacts, and manuscript text to that decision.
+If the study direction changes materially, update [architecture_revision_v2.md](architecture_revision_v2.md) first, then align:
+
+- code
+- results bundles
+- figures
+- manuscript text
+
+That order keeps the repo coherent and makes the paper easier to defend.
