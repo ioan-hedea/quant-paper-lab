@@ -389,14 +389,3 @@ For day-to-day work:
 2. Run `quant_research.py`.
 3. Let checkpoint reuse skip unchanged runs.
 4. Regenerate the plot bundle if needed.
-5. Update the manuscript.
-6. Rebuild the PDFs.
-
-If the study direction changes materially, update [architecture_revision_v2.md](architecture_revision_v2.md) first, then align:
-
-- code
-- results bundles
-- figures
-- manuscript text
-
-That order keeps the repo coherent and makes the paper easier to defend.
