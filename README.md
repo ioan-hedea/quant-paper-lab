@@ -206,25 +206,7 @@ This regenerates the higher-level paper figures inside the selected or latest re
 - `control_mpc_diagnostic.png`
 - `control_tail_diagnostic.png`
 - `legacy_pruning_story.png`
-
-### 4. Rebuild the Paper PDFs
-
-One-column:
-
-```bash
-cd paper/1col
-pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report.tex
-pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report.tex
-```
-
-Two-column:
-
-```bash
-cd paper/2col
-pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report_2col.tex
-pdflatex -interaction=nonstopmode -halt-on-error quant_pipeline_report_2col.tex
-```
-
+- 
 ## Universes
 
 Universe handling is now a first-class part of the repo.
@@ -327,11 +309,6 @@ This is intended to support the broader question:
 
 ## Paper Files
 
-Main sources:
-
-- [paper/1col/quant_pipeline_report.tex](paper/1col/quant_pipeline_report.tex)
-- [paper/2col/quant_pipeline_report_2col.tex](paper/2col/quant_pipeline_report_2col.tex)
-
 Built PDFs:
 
 - [paper/1col/quant_pipeline_report.pdf](paper/1col/quant_pipeline_report.pdf)
@@ -389,14 +366,3 @@ For day-to-day work:
 2. Run `quant_research.py`.
 3. Let checkpoint reuse skip unchanged runs.
 4. Regenerate the plot bundle if needed.
-5. Update the manuscript.
-6. Rebuild the PDFs.
-
-If the study direction changes materially, update [architecture_revision_v2.md](architecture_revision_v2.md) first, then align:
-
-- code
-- results bundles
-- figures
-- manuscript text
-
-That order keeps the repo coherent and makes the paper easier to defend.
