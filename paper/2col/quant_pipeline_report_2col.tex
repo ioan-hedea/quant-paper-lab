@@ -251,7 +251,7 @@ features, the allocator turns those signals into a target book, and the control
 layer decides how much of that book to express before the backtest engine
 records realized outcomes.
 
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{tikzpicture}[
   node distance = 0.45cm and 0.28cm,
@@ -1645,7 +1645,7 @@ side wherever possible, with the legacy diagnostics retained at the end as
 supporting context rather than primary evidence.
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_method_overview.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1664,7 +1664,7 @@ Right: Universe B, where the robust frontier is tighter and plain
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_split_heatmaps.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1682,7 +1682,7 @@ three train-fraction splits.}
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_pareto_frontier.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1702,7 +1702,7 @@ near the defensive frontier.}
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_interpretability.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1721,7 +1721,7 @@ by regime.}
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_tail_diagnostic.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1740,7 +1740,7 @@ smaller, matching the tighter D-versus-D+ ranking in the tables.}
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/control_mpc_diagnostic.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1758,7 +1758,7 @@ annotations, clarifying why \texttt{H\_mpc} sits on the low-drawdown frontier.}
 }{}
 
 \IfFileExists{../../results/20260330_221820_universe_A/legacy_pruning_story.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1777,7 +1777,7 @@ away from the old RL-heavy stack.}
 
 
 \IfFileExists{../../results/20260330_221820_universe_A/pipeline_rolling_windows.png}{
-\begin{figure*}[t]
+\begin{figure*}[p]
 \centering
 \begin{minipage}{0.49\textwidth}
 \centering
@@ -1814,6 +1814,7 @@ controllers.}
 \end{figure*}
 }{}
 
+\clearpage
 \begin{thebibliography}{99}
 
 \bibitem{almgren2000}
@@ -1956,6 +1957,361 @@ S. Sun, M. Qin, W. Zhang, H. Xia, C. Zong, J. Ying, Y. Xie, L. Zhao,
 R. S. Sutton and A. G. Barto.
 \newblock \emph{Reinforcement Learning: An Introduction}.
 \newblock MIT Press, Cambridge, MA, second edition, 2018.
+
+\bibitem{zhang2020}
+Z. Zhang, S. Zohren, and S. Roberts.
+\newblock Deep reinforcement learning for trading.
+\newblock \emph{The Journal of Financial Data Science}, 2(2):25--40, 2020.
+
+\bibitem{agrawal2013} % *** NEW ***
+S. Agrawal and N. Goyal.
+\newblock Thompson sampling for contextual bandits with linear payoffs.
+\newblock In \emph{International Conference on Machine Learning}, pages 127--135, 2013.
+
+% ============================================================================
+% MEAN-CVAR OPTIMIZATION (NEW)
+% ============================================================================
+
+\bibitem{alexander2006} % *** NEW ***
+S. Alexander, T. F. Coleman, and Y. Li.
+\newblock Minimizing CVaR and VaR for a portfolio of derivatives.
+\newblock \emph{Journal of Banking \& Finance}, 30(2):583--605, 2006.
+
+% ============================================================================
+% EXECUTION & TRANSACTION COSTS
+% ============================================================================
+
+\bibitem{almgren2000}
+R. Almgren and N. Chriss.
+\newblock Optimal execution of portfolio transactions.
+\newblock \emph{Journal of Risk}, 3(2):5--39, 2000.
+
+% ============================================================================
+% CONSTRAINED MDPS (NEW - FOR YOUR CMDP CONTROLLER)
+% ============================================================================
+
+\bibitem{altman1999} % *** NEW ***
+E. Altman.
+\newblock \emph{Constrained Markov Decision Processes}.
+\newblock CRC Press, 1999.
+
+% ============================================================================
+% COHERENT RISK MEASURES (NEW - CRITICAL FOR CVAR)
+% ============================================================================
+
+\bibitem{artzner1999} % *** NEW ***
+P. Artzner, F. Delbaen, J.-M. Eber, and D. Heath.
+\newblock Coherent measures of risk.
+\newblock \emph{Mathematical Finance}, 9(3):203--228, 1999.
+
+% ============================================================================
+% VOLATILITY MODELS
+% ============================================================================
+
+\bibitem{bollerslev1986}
+T. Bollerslev.
+\newblock Generalized autoregressive conditional heteroskedasticity.
+\newblock \emph{Journal of Econometrics}, 31(3):307--327, 1986.
+
+% ============================================================================
+% CONSTRAINED MDPS - LAGRANGIAN (NEW - FOR YOUR CMDP CONTROLLER)
+% ============================================================================
+
+\bibitem{borkar2005} % *** NEW ***
+V. S. Borkar.
+\newblock An actor-critic algorithm for constrained Markov decision processes.
+\newblock \emph{Systems \& Control Letters}, 54(3):207--213, 2005.
+
+% ============================================================================
+% RL FOR HEDGING
+% ============================================================================
+
+\bibitem{buehler2019}
+H. Buehler, L. Gonon, J. Teichmann, and B. Wood.
+\newblock Deep hedging.
+\newblock \emph{Quantitative Finance}, 19(8):1271--1291, 2019.
+
+% ============================================================================
+% MODEL PREDICTIVE CONTROL (NEW - FOR YOUR MPC CONTROLLER)
+% ============================================================================
+
+\bibitem{camacho2013} % *** NEW ***
+E. F. Camacho and C. B. Alba.
+\newblock \emph{Model Predictive Control}.
+\newblock Springer Science \& Business Media, 2013.
+
+% ============================================================================
+% MACHINE LEARNING IN ASSET PRICING
+% ============================================================================
+
+\bibitem{chen2021}
+L. Chen, M. Pelger, and J. Zhu.
+\newblock Deep learning in asset pricing.
+\newblock \emph{SSRN Working Paper 3350138}, revised 2021.
+
+% ============================================================================
+% RL FOR PORTFOLIO MANAGEMENT
+% ============================================================================
+
+\bibitem{cong2021}
+Y. Cong, B. Deng, X. Bao, and H. Dai.
+\newblock AlphaPortfolio: Direct construction through deep reinforcement learning
+  and interpretable representation learning.
+\newblock \emph{Proceedings of the AAAI Conference on Artificial Intelligence},
+  35(6):4831--4839, 2021.
+
+% ============================================================================
+% DISTRIBUTIONALLY ROBUST OPTIMIZATION (NEW)
+% ============================================================================
+
+\bibitem{delage2010} % *** NEW ***
+E. Delage and Y. Ye.
+\newblock Distributionally robust optimization under moment uncertainty with application to data-driven problems.
+\newblock \emph{Operations Research}, 58(3):595--612, 2010.
+
+% ============================================================================
+% RL FOR TRADING
+% ============================================================================
+
+\bibitem{deng2017}
+Y. Deng, F. Bao, Y. Kong, Z. Ren, and Q. Dai.
+\newblock Deep direct reinforcement learning for financial signal representation
+  and trading.
+\newblock \emph{IEEE Transactions on Neural Networks and Learning Systems},
+  28(3):653--664, 2017.
+
+% ============================================================================
+% RL FOR HEDGING
+% ============================================================================
+
+\bibitem{du2020}
+Y. Du, P. N. Kolm, A. Ritter, and T. Wang.
+\newblock Deep reinforcement learning for option replication and hedging.
+\newblock \emph{The Journal of Financial Data Science}, 2(4):44--59, 2020.
+
+% ============================================================================
+% VOLATILITY MODELS
+% ============================================================================
+
+\bibitem{engle1982}
+R. F. Engle.
+\newblock Autoregressive conditional heteroscedasticity with estimates of the
+  variance of United Kingdom inflation.
+\newblock \emph{Econometrica}, 50(4):987--1007, 1982.
+
+% ============================================================================
+% ROBUST PORTFOLIOS (NEW)
+% ============================================================================
+
+\bibitem{fabozzi2010} % *** NEW ***
+F. J. Fabozzi, D. Huang, and G. Zhou.
+\newblock Robust portfolios: contributions from operations research and finance.
+\newblock \emph{Annals of Operations Research}, 176(1):191--220, 2010.
+
+% ============================================================================
+% FACTOR INVESTING
+% ============================================================================
+
+\bibitem{fama1993}
+E. F. Fama and K. R. French.
+\newblock Common risk factors in the returns on stocks and bonds.
+\newblock \emph{Journal of Financial Economics}, 33(1):3--56, 1993.
+
+% ============================================================================
+% MACHINE LEARNING IN ASSET PRICING
+% ============================================================================
+
+\bibitem{giglio2022}
+S. Giglio, D. Xiu, and D. Zhang.
+\newblock Machine learning in asset pricing.
+\newblock \emph{Annual Review of Financial Economics}, 14:337--368, 2022.
+
+\bibitem{gu2020}
+S. Gu, B. Kelly, and D. Xiu.
+\newblock Empirical asset pricing via machine learning.
+\newblock \emph{Review of Financial Studies}, 33(5):2223--2273, 2020.
+
+% ============================================================================
+% REGIME SWITCHING
+% ============================================================================
+
+\bibitem{hamilton1989}
+J. D. Hamilton.
+\newblock A new approach to the economic analysis of nonstationary time series
+  and the business cycle.
+\newblock \emph{Econometrica}, 57(2):357--384, 1989.
+
+% ============================================================================
+% META-LEARNING (NEW - FOR YOUR COUNCIL/MLP CONTROLLERS)
+% ============================================================================
+
+\bibitem{hospedales2021} % *** NEW ***
+T. Hospedales, A. Antoniou, P. Micaelli, and A. Storkey.
+\newblock Meta-learning in neural networks: A survey.
+\newblock \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  44(9):5149--5169, 2022.
+
+% ============================================================================
+% MIXTURE OF EXPERTS (NEW - FOR YOUR COUNCIL CONTROLLER)
+% ============================================================================
+
+\bibitem{jacobs1991} % *** NEW ***
+R. A. Jacobs, M. I. Jordan, S. J. Nowlan, and G. E. Hinton.
+\newblock Adaptive mixtures of local experts.
+\newblock \emph{Neural Computation}, 3(1):79--87, 1991.
+
+% ============================================================================
+% RL BENCHMARKING
+% ============================================================================
+
+\bibitem{jander2025}
+J. Jander, H. H. Li, M. Schmid, and T. Pohl.
+\newblock Reinforcement learning in finance: From current practice to standards
+  and benchmarks.
+\newblock \emph{SSRN Working Paper 5703882}, 2025.
+
+% ============================================================================
+% MOMENTUM
+% ============================================================================
+
+\bibitem{jegadeesh1993}
+N. Jegadeesh and S. Titman.
+\newblock Returns to buying winners and selling losers: implications for stock
+  market efficiency.
+\newblock \emph{Journal of Finance}, 48(1):65--91, 1993.
+
+% ============================================================================
+% RL FOR PORTFOLIO MANAGEMENT
+% ============================================================================
+
+\bibitem{jiang2017}
+Z. Jiang, D. Xu, and J. Liang.
+\newblock A deep reinforcement learning framework for the financial portfolio
+  management problem.
+\newblock \emph{arXiv preprint arXiv:1706.10059}, 2017.
+
+% ============================================================================
+% RL FOR FINANCE - SURVEY
+% ============================================================================
+
+\bibitem{kolm2019}
+P. N. Kolm and G. Ritter.
+\newblock Modern perspectives on reinforcement learning in finance.
+\newblock \emph{SSRN Working Paper 3449401}, 2019.
+
+\bibitem{kolm2019hedge}
+P. N. Kolm and G. Ritter.
+\newblock Dynamic replication and hedging: A reinforcement learning approach.
+\newblock \emph{The Journal of Financial Data Science}, 1(4):159--171, 2019.
+
+% ============================================================================
+% CVAR PORTFOLIO OPTIMIZATION (NEW - CRITICAL!)
+% ============================================================================
+
+\bibitem{krokhmal2002} % *** NEW ***
+P. Krokhmal, J. Palmquist, and S. Uryasev.
+\newblock Portfolio optimization with conditional value-at-risk objective and constraints.
+\newblock \emph{Journal of Risk}, 4(2):43--68, 2002.
+
+% ============================================================================
+% CONTEXTUAL BANDITS - LinUCB (NEW)
+% ============================================================================
+
+\bibitem{li2010} % *** NEW ***
+L. Li, W. Chu, J. Langford, and R. E. Schapire.
+\newblock A contextual-bandit approach to personalized news article recommendation.
+\newblock In \emph{Proceedings of the 19th International Conference on World Wide Web},
+  pages 661--670, 2010.
+
+% ============================================================================
+% RL - EARLY WORK
+% ============================================================================
+
+\bibitem{moody2001}
+J. Moody and M. Saffell.
+\newblock Learning to trade via direct reinforcement.
+\newblock \emph{IEEE Transactions on Neural Networks}, 12(4):875--889, 2001.
+
+% ============================================================================
+% RL FOR EXECUTION
+% ============================================================================
+
+\bibitem{nevmyvaka2006}
+Y. Nevmyvaka, Y. Feng, and M. Kearns.
+\newblock Reinforcement learning for optimized trade execution.
+\newblock In \emph{Proceedings of the 23rd International Conference on Machine
+  Learning}, pages 673--680, 2006.
+
+% ============================================================================
+% RL FOR PORTFOLIO MANAGEMENT
+% ============================================================================
+
+\bibitem{pacheco2023}
+D. Pacheco Aznar.
+\newblock Portfolio management: A deep distributional reinforcement learning
+  approach.
+\newblock \emph{SSRN Working Paper 4522084}, 2023.
+
+% ============================================================================
+% FOUNDATIONAL CVAR PAPER (NEW - CRITICAL! MUST CITE!)
+% ============================================================================
+
+\bibitem{rockafellar2000} % *** NEW - MOST IMPORTANT ADDITION ***
+R. T. Rockafellar and S. Uryasev.
+\newblock Optimization of conditional value-at-risk.
+\newblock \emph{Journal of Risk}, 2(3):21--41, 2000.
+
+% ============================================================================
+% RISK MEASURES - DECISION THEORY
+% ============================================================================
+
+\bibitem{schmeidler1989}
+D. Schmeidler.
+\newblock Subjective probability and expected utility without additivity.
+\newblock \emph{Econometrica}, 57(3):571--587, 1989.
+
+% ============================================================================
+% RL BENCHMARKING
+% ============================================================================
+
+\bibitem{sun2023}
+S. Sun, M. Qin, W. Zhang, H. Xia, C. Zong, J. Ying, Y. Xie, L. Zhao,
+  X. Wang, and B. An.
+\newblock TradeMaster: A holistic quantitative trading platform empowered by
+  reinforcement learning.
+\newblock In \emph{Advances in Neural Information Processing Systems 36:
+  Datasets and Benchmarks Track}, 2023.
+
+% ============================================================================
+% RL - TEXTBOOK
+% ============================================================================
+
+\bibitem{sutton2018}
+R. S. Sutton and A. G. Barto.
+\newblock \emph{Reinforcement Learning: An Introduction}.
+\newblock MIT Press, Cambridge, MA, second edition, 2018.
+
+% ============================================================================
+% RISK MEASURES - DISTORTION
+% ============================================================================
+
+\bibitem{wang2000}
+S. S. Wang.
+\newblock A class of distortion operators for pricing financial and insurance risks.
+\newblock \emph{Journal of Risk and Insurance}, 67(1):15--36, 2000.
+
+% ============================================================================
+% RISK MEASURES - DUAL THEORY
+% ============================================================================
+
+\bibitem{yaari1987}
+M. E. Yaari.
+\newblock The dual theory of choice under risk.
+\newblock \emph{Econometrica}, 55(1):95--115, 1987.
+
+% ============================================================================
+% RL FOR TRADING
+% ============================================================================
 
 \bibitem{zhang2020}
 Z. Zhang, S. Zohren, and S. Roberts.
