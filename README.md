@@ -5,6 +5,27 @@ Research code and paper artifacts for **Systematic Evaluation of Control Mechani
 Public repository:
 - <https://github.com/ioan-hedea/quant-paper-lab>
 
+## Installation
+
+For local development, the repo now supports editable package installs:
+
+```bash
+pip install -e .
+```
+
+Optional extras:
+
+```bash
+pip install -e .[dev]
+pip install -e .[e2e]
+```
+
+Installed console commands:
+
+- `quant-pipeline`: run the main pipeline entrypoint
+- `quant-research`: run the research/evaluation bundle
+- `quant-plots`: regenerate the control-story plot set for the latest results bundle
+
 This project began as an RL-heavy modular trading prototype and evolved into a broader, more disciplined study of **portfolio control as risk shaping** on top of a finance-first alpha engine. The current repository contains:
 
 - the active two-universe research code

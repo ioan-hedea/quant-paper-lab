@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-pipeline-lab"
+version = "0.1.0"
+description = "Research package for systematic evaluation of portfolio control mechanisms."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Ioan Hedea" }
+]
+keywords = [
+  "portfolio-management",
+  "systematic-trading",
+  "risk-shaping",
+  "quant-research",
+]
+dependencies = [
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "scipy>=1.13,<2",
+  "matplotlib>=3.8,<4",
+  "yfinance>=0.2.54,<1",
+  "scikit-learn>=1.4,<2",
+  "statsmodels>=0.14,<1",
+  "arch>=7,<8",
+  "gymnasium>=0.29,<1.1",
+]
+
+[project.optional-dependencies]
+e2e = [
+  "stable-baselines3>=2.3,<3",
+]
+dev = [
+  "flake8>=7,<8",
+  "pytest>=8,<9",
+]
+
+[project.scripts]
+quant-pipeline = "quant_stack.cli:pipeline_main"
+quant-research = "quant_stack.cli:research_main"
+quant-plots = "quant_stack.cli:plots_main"
+
+[tool.setuptools]
+py-modules = ["logging_utils", "quant_pipeline", "quant_research"]
+
+[tool.setuptools.packages.find]
+include = ["quant_stack*", "scripts*"]
