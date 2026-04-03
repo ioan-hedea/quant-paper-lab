@@ -252,6 +252,11 @@ class CostModelConfig:
     use_almgren_chriss: bool = True
     ac_permanent_beta: float = 0.10
     ac_temporary_eta: float = 0.50
+    cost_stress_multiplier: float = 1.0
+    adv_lookback_days: int = 20
+    adv_participation_cap: float = 0.05
+    adv_penalty_bps: float = 10.0
+    execution_delay_days: int = 0
 
 
 @dataclass
@@ -264,6 +269,16 @@ class OptimizerConfig:
     alpha_strength: float = 1.5
     anchor_strength: float = 10.0
     turnover_penalty: float = 2.0
+    adaptive_allocator: bool = True
+    adaptive_allocator_min_invested: float = 0.60
+    adaptive_allocator_param_smoothing: float = 0.55
+    adaptive_allocator_risk_mult_range: tuple[float, float] = (0.70, 2.40)
+    adaptive_allocator_anchor_mult_range: tuple[float, float] = (0.60, 1.90)
+    adaptive_allocator_turnover_mult_range: tuple[float, float] = (0.75, 2.50)
+    adaptive_allocator_alpha_mult_range: tuple[float, float] = (0.75, 1.35)
+    adaptive_allocator_cap_scale_range: tuple[float, float] = (0.75, 1.20)
+    adaptive_allocator_group_cap_scale_range: tuple[float, float] = (0.85, 1.05)
+    adaptive_allocator_policy_version: int = 1
     group_caps: dict[str, float] = field(
         default_factory=lambda: {
             group: 0.40 for group in (
@@ -272,6 +287,20 @@ class OptimizerConfig:
             )
         }
     )
+
+
+@dataclass
+class AlphaFeedbackConfig:
+    """Closed-loop alpha adaptation using prior actions and portfolio state."""
+
+    enabled: bool = False
+    exposure_reweight_strength: float = 0.18
+    cash_garch_boost: float = 0.18
+    cash_hmm_boost: float = 0.24
+    crowded_name_penalty_strength: float = 0.08
+    action_regime_feedback_strength: float = 0.12
+    shrink_in_stress_strength: float = 0.08
+    policy_version: int = 2
 
 
 @dataclass
@@ -375,6 +404,17 @@ class ControlConfig:
     mpc_terminal_penalty: float = 0.75
     mpc_max_daily_change: float = 0.18
     mpc_objective_version: int = 2
+    # Legacy decision-aware allocator controller (kept for backwards compatibility;
+    # the active architecture now applies these rules directly inside the allocator)
+    adaptive_allocator_min_invested: float = 0.60
+    adaptive_allocator_param_smoothing: float = 0.55
+    adaptive_allocator_risk_mult_range: tuple[float, float] = (0.70, 2.40)
+    adaptive_allocator_anchor_mult_range: tuple[float, float] = (0.60, 1.90)
+    adaptive_allocator_turnover_mult_range: tuple[float, float] = (0.75, 2.50)
+    adaptive_allocator_alpha_mult_range: tuple[float, float] = (0.75, 1.35)
+    adaptive_allocator_cap_scale_range: tuple[float, float] = (0.75, 1.20)
+    adaptive_allocator_group_cap_scale_range: tuple[float, float] = (0.85, 1.05)
+    adaptive_allocator_policy_version: int = 1
     # F: CMDP-style constrained controller
     cmdp_constraint_type: str = 'drawdown'  # 'drawdown' or 'tail_loss'
     cmdp_constraint_kappa: float = 0.12
@@ -445,6 +485,7 @@ class PipelineConfig:
     feature_availability: FeatureAvailabilityConfig = field(default_factory=FeatureAvailabilityConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    alpha_feedback: AlphaFeedbackConfig = field(default_factory=AlphaFeedbackConfig)
     option_overlay: OptionOverlayConfig = field(default_factory=OptionOverlayConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
@@ -462,9 +503,12 @@ class EvaluationConfig:
     rolling_step_days: int = 126
     min_rolling_windows: int = 4
     max_rolling_windows: int = 6
-    cost_bps_grid: tuple[float, ...] = (3.0, 5.0, 8.0, 12.0)
+    cost_bps_grid: tuple[float, ...] = (3.0, 5.0, 8.0, 12.0, 20.0, 35.0)
+    cost_stress_multiplier_grid: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
     rebalance_band_grid: tuple[float, ...] = (0.005, 0.015, 0.03)
     hedge_scale_grid: tuple[float, ...] = (0.75, 1.0, 1.25)
+    adv_participation_cap_grid: tuple[float, ...] = (0.02, 0.05, 0.10)
+    execution_delay_grid: tuple[int, ...] = (0, 1, 2, 5)
     macro_lag_grid: tuple[int, ...] = (1, 3, 5)
     reward_mode_grid: tuple[str, ...] = ('differential_sharpe', 'return', 'sortino', 'mean_variance')
     research_e2e_scope: str = 'baseline_only'

@@ -15,7 +15,6 @@ import pandas as pd
 from scipy import stats as sp_stats
 
 from .config import (
-    CONTROL_METHODS,
     ControlConfig,
     EvaluationConfig,
     ExperimentConfig,
@@ -349,6 +348,17 @@ def _metric_summary(results: dict[str, object]) -> dict[str, float | str]:
     summary.update({
         'avg_turnover': turnover,
         'avg_transaction_cost': tx_cost,
+        'avg_desired_turnover': float(np.mean(results.get('desired_turnover', [0.0]))),
+        'avg_buy_turnover': float(np.mean(results.get('buy_turnover', [0.0]))),
+        'avg_sell_turnover': float(np.mean(results.get('sell_turnover', [0.0]))),
+        'avg_participation_rate': float(np.mean(results.get('avg_participation_rates', [0.0]))),
+        'avg_max_participation_rate': float(np.mean(results.get('max_participation_rates', [0.0]))),
+        'liquidity_cap_hit_rate': float(np.mean(results.get('adv_cap_hits', [0.0]))),
+        'avg_adv_excess_ratio': float(np.mean(results.get('adv_excess_ratios', [0.0]))),
+        'avg_execution_weight_gap': float(np.mean(results.get('execution_weight_gaps', [0.0]))),
+        'avg_execution_delay_gap': float(np.mean(results.get('execution_delay_gaps', [0.0]))),
+        'avg_execution_shortfall': float(np.mean(results.get('execution_shortfalls', [0.0]))),
+        'execution_delay_days': float(np.mean(results.get('execution_delay_days', [0.0]))),
     })
     return summary
 
@@ -361,6 +371,15 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     hedge_actions = np.asarray(results.get('hedge_actions', []), dtype=int)
     hedge_type_actions = np.asarray(results.get('hedge_type_actions', []), dtype=int)
     turnover = np.asarray(results.get('turnover', []), dtype=float)
+    desired_turnover = np.asarray(results.get('desired_turnover', []), dtype=float)
+    buy_turnover = np.asarray(results.get('buy_turnover', []), dtype=float)
+    sell_turnover = np.asarray(results.get('sell_turnover', []), dtype=float)
+    avg_participation = np.asarray(results.get('avg_participation_rates', []), dtype=float)
+    max_participation = np.asarray(results.get('max_participation_rates', []), dtype=float)
+    adv_cap_hits = np.asarray(results.get('adv_cap_hits', []), dtype=float)
+    execution_weight_gaps = np.asarray(results.get('execution_weight_gaps', []), dtype=float)
+    execution_delay_gaps = np.asarray(results.get('execution_delay_gaps', []), dtype=float)
+    execution_shortfalls = np.asarray(results.get('execution_shortfalls', []), dtype=float)
     hedge_ratios = np.asarray(results.get('hedge_ratios', []), dtype=float)
     hedge_costs = np.asarray(results.get('hedge_costs', []), dtype=float)
     hedge_benefits = np.asarray(results.get('hedge_benefits', []), dtype=float)
@@ -391,6 +410,15 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
         len(hedge_actions),
         len(hedge_type_actions) if len(hedge_type_actions) > 0 else len(beliefs),
         len(turnover),
+        len(desired_turnover) if len(desired_turnover) > 0 else len(beliefs),
+        len(buy_turnover) if len(buy_turnover) > 0 else len(beliefs),
+        len(sell_turnover) if len(sell_turnover) > 0 else len(beliefs),
+        len(avg_participation) if len(avg_participation) > 0 else len(beliefs),
+        len(max_participation) if len(max_participation) > 0 else len(beliefs),
+        len(adv_cap_hits) if len(adv_cap_hits) > 0 else len(beliefs),
+        len(execution_weight_gaps) if len(execution_weight_gaps) > 0 else len(beliefs),
+        len(execution_delay_gaps) if len(execution_delay_gaps) > 0 else len(beliefs),
+        len(execution_shortfalls) if len(execution_shortfalls) > 0 else len(beliefs),
         len(wealth_rets),
         len(hedge_ratios),
         len(hedge_costs) if len(hedge_costs) > 0 else len(beliefs),
@@ -417,6 +445,15 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
     hedge_actions = hedge_actions[:n_obs]
     hedge_type_actions = hedge_type_actions[:n_obs] if len(hedge_type_actions) > 0 else np.zeros(n_obs, dtype=int)
     turnover = turnover[:n_obs]
+    desired_turnover = desired_turnover[:n_obs] if len(desired_turnover) > 0 else np.zeros(n_obs, dtype=float)
+    buy_turnover = buy_turnover[:n_obs] if len(buy_turnover) > 0 else np.zeros(n_obs, dtype=float)
+    sell_turnover = sell_turnover[:n_obs] if len(sell_turnover) > 0 else np.zeros(n_obs, dtype=float)
+    avg_participation = avg_participation[:n_obs] if len(avg_participation) > 0 else np.zeros(n_obs, dtype=float)
+    max_participation = max_participation[:n_obs] if len(max_participation) > 0 else np.zeros(n_obs, dtype=float)
+    adv_cap_hits = adv_cap_hits[:n_obs] if len(adv_cap_hits) > 0 else np.zeros(n_obs, dtype=float)
+    execution_weight_gaps = execution_weight_gaps[:n_obs] if len(execution_weight_gaps) > 0 else np.zeros(n_obs, dtype=float)
+    execution_delay_gaps = execution_delay_gaps[:n_obs] if len(execution_delay_gaps) > 0 else np.zeros(n_obs, dtype=float)
+    execution_shortfalls = execution_shortfalls[:n_obs] if len(execution_shortfalls) > 0 else np.zeros(n_obs, dtype=float)
     hedge_ratios = hedge_ratios[:n_obs]
     hedge_costs = hedge_costs[:n_obs] if len(hedge_costs) > 0 else np.zeros(n_obs, dtype=float)
     hedge_benefits = hedge_benefits[:n_obs] if len(hedge_benefits) > 0 else np.zeros(n_obs, dtype=float)
@@ -465,6 +502,15 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
             'avg_hedge_benefit': float(hedge_benefits[mask].mean()),
             'avg_cash_weight': float(cash_weights[mask].mean()),
             'avg_turnover': float(turnover[mask].mean()),
+            'avg_desired_turnover': float(desired_turnover[mask].mean()),
+            'avg_buy_turnover': float(buy_turnover[mask].mean()),
+            'avg_sell_turnover': float(sell_turnover[mask].mean()),
+            'avg_participation_rate': float(avg_participation[mask].mean()),
+            'avg_max_participation_rate': float(max_participation[mask].mean()),
+            'liquidity_cap_hit_rate': float(adv_cap_hits[mask].mean()),
+            'avg_execution_weight_gap': float(execution_weight_gaps[mask].mean()),
+            'avg_execution_delay_gap': float(execution_delay_gaps[mask].mean()),
+            'avg_execution_shortfall': float(execution_shortfalls[mask].mean()),
             'avg_transaction_cost': float(tx_costs[mask].mean()),
             'avg_uncertainty_score': float(uncertainty[mask].mean()),
             'avg_convexity_mode': float(convexity_modes[mask].mean()),
@@ -481,6 +527,31 @@ def _regime_summary(results: dict[str, object]) -> list[dict[str, float | str]]:
             'ann_vol': float(wealth_rets[mask].std() * np.sqrt(252)),
         })
     return rows
+
+
+def _build_execution_summary(metrics: pd.DataFrame) -> pd.DataFrame:
+    execution = metrics[metrics['suite'] == 'control_comparison'].copy()
+    if execution.empty:
+        return pd.DataFrame()
+    execution['component_label'] = execution['label'].map(_control_component_label)
+    return (
+        execution.groupby('component_label')
+        .agg(
+            mean_turnover=('avg_turnover', 'mean'),
+            mean_desired_turnover=('avg_desired_turnover', 'mean'),
+            mean_buy_turnover=('avg_buy_turnover', 'mean'),
+            mean_sell_turnover=('avg_sell_turnover', 'mean'),
+            mean_participation_rate=('avg_participation_rate', 'mean'),
+            mean_max_participation_rate=('avg_max_participation_rate', 'mean'),
+            liquidity_cap_hit_rate=('liquidity_cap_hit_rate', 'mean'),
+            mean_execution_weight_gap=('avg_execution_weight_gap', 'mean'),
+            mean_execution_delay_gap=('avg_execution_delay_gap', 'mean'),
+            mean_execution_shortfall=('avg_execution_shortfall', 'mean'),
+            mean_transaction_cost=('avg_transaction_cost', 'mean'),
+        )
+        .reset_index()
+        .sort_values('mean_execution_shortfall', ascending=False)
+    )
 
 
 def _slice_inputs(
@@ -844,6 +915,7 @@ def _display_label(label: str) -> str:
         'D_cvar_robust': 'D: CVaR-Robust',
         'D_plus_convexity': 'D+: CVaR + Convexity',
         'H_mpc': 'H: MPC',
+        'I_adaptive_allocator': 'I: Adaptive Allocator',
         'E_council': 'E: Council',
         'E_plus_convexity': 'E+: Council + Convexity',
         'G_mlp_meta': 'G: MLP Meta',
@@ -970,7 +1042,7 @@ def _control_family(label: str) -> str:
         return 'supervised'
     if label.startswith('D'):
         return 'robust opt'
-    if label.startswith('H'):
+    if label.startswith('H') or label.startswith('I'):
         return 'predictive control'
     if label.startswith('E') or label.startswith('G'):
         return 'meta control'
@@ -1468,6 +1540,17 @@ def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, objec
             'mpc_terminal_penalty',
             'mpc_max_daily_change',
         ),
+        'adaptive_allocator': (
+            'adaptive_allocator_min_invested',
+            'adaptive_allocator_param_smoothing',
+            'adaptive_allocator_risk_mult_range',
+            'adaptive_allocator_anchor_mult_range',
+            'adaptive_allocator_turnover_mult_range',
+            'adaptive_allocator_alpha_mult_range',
+            'adaptive_allocator_cap_scale_range',
+            'adaptive_allocator_group_cap_scale_range',
+            'adaptive_allocator_policy_version',
+        ),
         'q_learning': ('ql_alpha', 'ql_gamma', 'ql_epsilon'),
     }
 
@@ -1539,6 +1622,16 @@ def _canonical_pipeline_config(config_payload: dict[str, object]) -> dict[str, o
             'alpha_strength': _normalize_checkpoint_value(optimizer_cfg.get('alpha_strength')),
             'anchor_strength': _normalize_checkpoint_value(optimizer_cfg.get('anchor_strength')),
             'turnover_penalty': _normalize_checkpoint_value(optimizer_cfg.get('turnover_penalty')),
+            'adaptive_allocator': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator')),
+            'adaptive_allocator_min_invested': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_min_invested')),
+            'adaptive_allocator_param_smoothing': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_param_smoothing')),
+            'adaptive_allocator_risk_mult_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_risk_mult_range')),
+            'adaptive_allocator_anchor_mult_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_anchor_mult_range')),
+            'adaptive_allocator_turnover_mult_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_turnover_mult_range')),
+            'adaptive_allocator_alpha_mult_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_alpha_mult_range')),
+            'adaptive_allocator_cap_scale_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_cap_scale_range')),
+            'adaptive_allocator_group_cap_scale_range': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_group_cap_scale_range')),
+            'adaptive_allocator_policy_version': _normalize_checkpoint_value(optimizer_cfg.get('adaptive_allocator_policy_version')),
             'group_caps': _normalize_checkpoint_value(optimizer_cfg.get('group_caps')),
         },
         'option_overlay': {
@@ -1840,7 +1933,10 @@ def run_research_evaluation(
         + 1  # strict timing
         + len(rolling_starts)
         + len(evaluation_config.cost_bps_grid)
+        + len(evaluation_config.cost_stress_multiplier_grid)
         + len(evaluation_config.rebalance_band_grid)
+        + len(evaluation_config.adv_participation_cap_grid)
+        + len(evaluation_config.execution_delay_grid)
         + (len(evaluation_config.hedge_scale_grid) if base_config.experiment.use_hedge_rl else 0)
         + len(evaluation_config.macro_lag_grid)
         + len(evaluation_config.reward_mode_grid)
@@ -2134,6 +2230,24 @@ def run_research_evaluation(
         row.update({'suite': 'cost_sensitivity', 'window_id': 'full_sample', 'param_name': 'base_cost_bps', 'param_value': base_cost_bps})
         metric_rows.append(row)
 
+    for cost_multiplier in evaluation_config.cost_stress_multiplier_grid:
+        stress_config = copy.deepcopy(base_config)
+        stress_config.cost_model.cost_stress_multiplier = cost_multiplier
+        stress_config.experiment.label = 'full_pipeline'
+        results = _run_with_research_logging(
+            prices,
+            volumes,
+            returns,
+            macro_data,
+            stress_config,
+            suite='cost_stress_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"cost_stress_sensitivity_{cost_multiplier}",
+        )
+        row = _metric_summary(results)
+        row.update({'suite': 'cost_stress_sensitivity', 'window_id': 'full_sample', 'param_name': 'cost_stress_multiplier', 'param_value': cost_multiplier})
+        metric_rows.append(row)
+
     for rebalance_band in evaluation_config.rebalance_band_grid:
         band_config = copy.deepcopy(base_config)
         band_config.rebalance_band = rebalance_band
@@ -2150,6 +2264,42 @@ def run_research_evaluation(
         )
         row = _metric_summary(results)
         row.update({'suite': 'rebalance_sensitivity', 'window_id': 'full_sample', 'param_name': 'rebalance_band', 'param_value': rebalance_band})
+        metric_rows.append(row)
+
+    for adv_cap in evaluation_config.adv_participation_cap_grid:
+        liquidity_config = copy.deepcopy(base_config)
+        liquidity_config.cost_model.adv_participation_cap = adv_cap
+        liquidity_config.experiment.label = 'full_pipeline'
+        results = _run_with_research_logging(
+            prices,
+            volumes,
+            returns,
+            macro_data,
+            liquidity_config,
+            suite='liquidity_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"liquidity_sensitivity_{adv_cap}",
+        )
+        row = _metric_summary(results)
+        row.update({'suite': 'liquidity_sensitivity', 'window_id': 'full_sample', 'param_name': 'adv_participation_cap', 'param_value': adv_cap})
+        metric_rows.append(row)
+
+    for delay_days in evaluation_config.execution_delay_grid:
+        delay_config = copy.deepcopy(base_config)
+        delay_config.cost_model.execution_delay_days = int(delay_days)
+        delay_config.experiment.label = 'full_pipeline'
+        results = _run_with_research_logging(
+            prices,
+            volumes,
+            returns,
+            macro_data,
+            delay_config,
+            suite='delay_sensitivity',
+            include_e2e=evaluation_config.research_e2e_scope == 'all',
+            run_key=f"delay_sensitivity_{delay_days}",
+        )
+        row = _metric_summary(results)
+        row.update({'suite': 'delay_sensitivity', 'window_id': 'full_sample', 'param_name': 'execution_delay_days', 'param_value': delay_days})
         metric_rows.append(row)
 
     if base_config.experiment.use_hedge_rl:
@@ -2255,6 +2405,7 @@ def run_research_evaluation(
     rolling_references = pd.DataFrame(rolling_reference_rows)
     ablation_summary = _build_ablation_summary(metrics)
     control_comparison_summary = _build_control_comparison_summary(metrics)
+    execution_summary = _build_execution_summary(metrics)
     robustness_summary = _build_robustness_summary(metrics, rolling_references)
     bootstrap_cis = pd.DataFrame()
     bootstrap_significance = pd.DataFrame()
@@ -2392,6 +2543,8 @@ def run_research_evaluation(
         for _, row in control_comparison_summary.iterrows():
             print(f"    {row['component_label']:25s}  Sharpe={row['mean_sharpe']:.2f}  "
                   f"Calmar={row['mean_calmar']:.2f}  MaxDD={row['mean_max_drawdown']:.1%}")
+    if not execution_summary.empty:
+        execution_summary.to_csv(output_dir / 'research_execution_summary.csv', index=False)
     robustness_summary.to_csv(output_dir / 'research_robustness_summary.csv', index=False)
     if not bootstrap_cis.empty:
         bootstrap_cis.to_csv(output_dir / 'research_bootstrap_cis.csv', index=False)
@@ -2437,6 +2590,7 @@ def run_research_evaluation(
         'n_regime_rows': len(regime_summary),
         'ablation_summary': ablation_summary.to_dict(orient='records'),
         'control_comparison_summary': control_comparison_summary.to_dict(orient='records') if not control_comparison_summary.empty else [],
+        'execution_summary': execution_summary.to_dict(orient='records') if not execution_summary.empty else [],
         'robustness_summary': robustness_summary.to_dict(orient='records'),
         'bootstrap_cis': bootstrap_cis.to_dict(orient='records'),
         'bootstrap_significance': bootstrap_significance.to_dict(orient='records'),

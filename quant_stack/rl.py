@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import replace
 from typing import Sequence
 
 import numpy as np
@@ -45,11 +46,133 @@ class PortfolioConstructionRL:
         self.Q = defaultdict(lambda: np.zeros(n_risk_levels))
         self.reward_buffer = deque(maxlen=60)
         self._cov_cache: dict[int, np.ndarray] = {}  # id(returns_df) -> covariance
+        self._latest_allocator_diagnostics: dict[str, float | int | str] = {}
+        self._smoothed_allocator_theta: dict[str, float] | None = None
 
         # RL now mostly adjusts total exposure and a small active overlay
         # around a factor-anchored target book.
         self.invest_fractions = [0.82, 0.90, 0.95, 0.98, 1.00]
         self.overlay_sizes = [0.05, 0.08, 0.12, 0.16, 0.20]
+
+    @staticmethod
+    def _interp(bounds: tuple[float, float], signal: float) -> float:
+        low, high = map(float, bounds)
+        clipped = float(np.clip(signal, 0.0, 1.0))
+        return low + (high - low) * clipped
+
+    def _adaptive_stress_score(self, control_state) -> float:
+        if control_state is None:
+            return 0.0
+        dd_component = float(np.clip((-float(getattr(control_state, 'recent_drawdown', 0.0)) - 0.02) / 0.16, 0.0, 1.0))
+        vol_component = float(np.clip((float(getattr(control_state, 'recent_vol', 0.15)) - 0.14) / 0.20, 0.0, 1.0))
+        regime_component = float(np.clip((0.52 - float(getattr(control_state, 'regime_belief', 0.5))) / 0.42, 0.0, 1.0))
+        concentration_component = float(np.clip((float(getattr(control_state, 'concentration', 0.0)) - 0.16) / 0.20, 0.0, 1.0))
+        return float(np.clip(
+            0.40 * dd_component
+            + 0.28 * vol_component
+            + 0.22 * regime_component
+            + 0.10 * concentration_component,
+            0.0,
+            1.0,
+        ))
+
+    def _adapt_optimizer_config(
+        self,
+        optimizer_config: OptimizerConfig,
+        control_state=None,
+    ) -> OptimizerConfig:
+        if not bool(getattr(optimizer_config, 'adaptive_allocator', False)):
+            self._latest_allocator_diagnostics = {
+                'adaptive_allocator_enabled': 0,
+                'adaptive_allocator_stress_score': 0.0,
+                'adaptive_allocator_risk_mult': 1.0,
+                'adaptive_allocator_anchor_mult': 1.0,
+                'adaptive_allocator_turnover_mult': 1.0,
+                'adaptive_allocator_alpha_mult': 1.0,
+                'adaptive_allocator_cap_scale': 1.0,
+                'adaptive_allocator_group_cap_scale': 1.0,
+                'adaptive_allocator_max_weight': float(optimizer_config.max_weight),
+            }
+            return optimizer_config
+
+        stress = self._adaptive_stress_score(control_state)
+        alpha_strength = float(getattr(control_state, 'alpha_strength', 0.0))
+        trend = float(getattr(control_state, 'trend', 0.0))
+        concentration = float(getattr(control_state, 'concentration', 0.0))
+
+        alpha_boost = float(np.tanh(6.0 * alpha_strength))
+        trend_signal = float(np.tanh(2.0 * trend))
+        concentration_penalty = float(np.clip((concentration - 0.16) / 0.18, 0.0, 1.0))
+
+        risk_signal = float(np.clip(0.35 + 0.60 * stress + 0.15 * concentration_penalty - 0.18 * alpha_boost, 0.0, 1.0))
+        anchor_signal = float(np.clip(0.25 + 0.55 * stress + 0.20 * concentration_penalty - 0.10 * trend_signal, 0.0, 1.0))
+        turnover_signal = float(np.clip(0.20 + 0.65 * stress + 0.15 * concentration_penalty, 0.0, 1.0))
+        alpha_signal = float(np.clip(0.35 + 0.28 * alpha_boost + 0.12 * trend_signal - 0.20 * stress, 0.0, 1.0))
+        cap_signal = float(np.clip(0.62 - 0.35 * stress + 0.28 * alpha_boost - 0.18 * concentration_penalty, 0.0, 1.0))
+        group_signal = float(np.clip(0.70 - 0.32 * stress + 0.10 * alpha_boost, 0.0, 1.0))
+
+        raw_theta = {
+            'risk_mult': self._interp(optimizer_config.adaptive_allocator_risk_mult_range, risk_signal),
+            'anchor_mult': self._interp(optimizer_config.adaptive_allocator_anchor_mult_range, anchor_signal),
+            'turnover_mult': self._interp(optimizer_config.adaptive_allocator_turnover_mult_range, turnover_signal),
+            'alpha_mult': self._interp(optimizer_config.adaptive_allocator_alpha_mult_range, alpha_signal),
+            'cap_scale': self._interp(optimizer_config.adaptive_allocator_cap_scale_range, cap_signal),
+            'group_cap_scale': self._interp(optimizer_config.adaptive_allocator_group_cap_scale_range, group_signal),
+        }
+
+        smoothing = float(np.clip(optimizer_config.adaptive_allocator_param_smoothing, 0.0, 0.95))
+        if self._smoothed_allocator_theta is None:
+            theta = raw_theta
+        else:
+            theta = {
+                key: float(smoothing * self._smoothed_allocator_theta[key] + (1.0 - smoothing) * raw_theta[key])
+                for key in raw_theta
+            }
+        self._smoothed_allocator_theta = dict(theta)
+
+        max_weight = float(np.clip(
+            optimizer_config.max_weight * theta['cap_scale'],
+            0.05,
+            0.30,
+        ))
+        group_caps = {
+            group: float(np.clip(cap * theta['group_cap_scale'], 0.10, 1.0))
+            for group, cap in optimizer_config.group_caps.items()
+        }
+        adapted = replace(
+            optimizer_config,
+            risk_aversion=float(optimizer_config.risk_aversion * theta['risk_mult']),
+            alpha_strength=float(optimizer_config.alpha_strength * theta['alpha_mult']),
+            anchor_strength=float(optimizer_config.anchor_strength * theta['anchor_mult']),
+            turnover_penalty=float(optimizer_config.turnover_penalty * theta['turnover_mult']),
+            max_weight=max_weight,
+            group_caps=group_caps,
+        )
+        self._latest_allocator_diagnostics = {
+            'adaptive_allocator_enabled': 1,
+            'adaptive_allocator_policy_version': int(getattr(optimizer_config, 'adaptive_allocator_policy_version', 1)),
+            'adaptive_allocator_stress_score': float(stress),
+            'adaptive_allocator_risk_mult': float(theta['risk_mult']),
+            'adaptive_allocator_anchor_mult': float(theta['anchor_mult']),
+            'adaptive_allocator_turnover_mult': float(theta['turnover_mult']),
+            'adaptive_allocator_alpha_mult': float(theta['alpha_mult']),
+            'adaptive_allocator_cap_scale': float(theta['cap_scale']),
+            'adaptive_allocator_group_cap_scale': float(theta['group_cap_scale']),
+            'adaptive_allocator_max_weight': float(max_weight),
+        }
+        return adapted
+
+    def current_allocator_diagnostics(self) -> dict[str, float | int | str]:
+        return dict(self._latest_allocator_diagnostics)
+
+    def adapt_optimizer_config(
+        self,
+        optimizer_config: OptimizerConfig | None = None,
+        control_state=None,
+    ) -> OptimizerConfig:
+        """Expose the allocator's state-conditional parameter adaptation."""
+        base_config = optimizer_config or self.optimizer_config
+        return self._adapt_optimizer_config(base_config, control_state=control_state)
 
     def get_state(
         self,
@@ -219,6 +342,9 @@ class PortfolioConstructionRL:
         confidence: pd.Series,
         recent_returns: pd.DataFrame | None,
         prev_weights: pd.Series | None = None,
+        optimizer_config: OptimizerConfig | None = None,
+        control_state=None,
+        adapt_config: bool = True,
     ) -> pd.Series:
         """
         Constrained allocator between the alpha layer and RL.
@@ -226,7 +352,11 @@ class PortfolioConstructionRL:
         book with anchor, risk, turnover, and group-concentration controls.
         """
         base_target = self.build_factor_target(factor_scores, confidence, recent_returns)
-        config = self.optimizer_config
+        base_config = optimizer_config or self.optimizer_config
+        config = (
+            self._adapt_optimizer_config(base_config, control_state=control_state)
+            if adapt_config else base_config
+        )
         tickers = factor_scores.index
         n_assets = len(tickers)
         effective_max_weight = max(config.max_weight, 1.0 / max(1, n_assets))
@@ -314,6 +444,7 @@ class PortfolioConstructionRL:
         action: int,
         recent_returns: pd.DataFrame | None = None,
         prev_weights: pd.Series | None = None,
+        control_state=None,
     ) -> tuple[pd.Series, float]:
         """
         Build a factor-anchored portfolio.
@@ -329,6 +460,7 @@ class PortfolioConstructionRL:
             confidence,
             recent_returns,
             prev_weights=prev_weights,
+            control_state=control_state,
         )
         n_assets = len(weighted_alpha)
 
@@ -354,7 +486,8 @@ class PortfolioConstructionRL:
         core_weights = optimized_target * core_budget
 
         weights = core_weights + satellite_weights * satellite_budget
-        effective_cap = max(self.optimizer_config.max_weight, invest_frac / max(1, n_assets))
+        allocator_cap = float(self._latest_allocator_diagnostics.get('adaptive_allocator_max_weight', self.optimizer_config.max_weight))
+        effective_cap = max(allocator_cap, invest_frac / max(1, n_assets))
         weights = self._enforce_absolute_weight_cap(weights, effective_cap)
         cash_weight = max(0.0, 1.0 - invest_frac)
 
@@ -367,6 +500,7 @@ class PortfolioConstructionRL:
         confidence: pd.Series,
         recent_returns: pd.DataFrame | None = None,
         prev_weights: pd.Series | None = None,
+        control_state=None,
     ) -> tuple[pd.Series, float]:
         """
         Build the constrained allocator book with no RL control layer.
@@ -378,6 +512,7 @@ class PortfolioConstructionRL:
             confidence=confidence,
             recent_returns=recent_returns,
             prev_weights=prev_weights,
+            control_state=control_state,
         )
         return weights, 0.0
 

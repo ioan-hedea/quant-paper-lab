@@ -37,25 +37,110 @@ def _compute_transaction_cost(
     max_trade_change: float,
     portfolio_vol: float,
     config: PipelineConfig,
-    avg_daily_volume_frac: float = 0.01,
+    avg_participation_rate: float = 0.0,
+    max_participation_rate: float = 0.0,
+    adv_excess_ratio: float = 0.0,
 ) -> float:
+    stress = float(max(config.cost_model.cost_stress_multiplier, 0.0))
+    base_cost = stress * turnover * config.cost_model.base_cost_bps / 10000
+    vol_cost = stress * turnover * portfolio_vol * config.cost_model.turnover_vol_multiplier
+    size_cost = stress * max_trade_change * config.cost_model.size_penalty_bps / 10000
+    liquidity_penalty = stress * adv_excess_ratio * config.cost_model.adv_penalty_bps / 10000
+    impact_cost = 0.0
     if config.cost_model.use_almgren_chriss:
-        participation_rate = turnover * avg_daily_volume_frac
-        permanent = config.cost_model.ac_permanent_beta * participation_rate
-        temporary = (config.cost_model.ac_temporary_eta
-                     * participation_rate * portfolio_vol)
-        return float(permanent + temporary)
-    base_cost = turnover * config.cost_model.base_cost_bps / 10000
-    vol_cost = turnover * portfolio_vol * config.cost_model.turnover_vol_multiplier
-    size_cost = max_trade_change * config.cost_model.size_penalty_bps / 10000
-    return float(base_cost + vol_cost + size_cost)
+        permanent = stress * config.cost_model.ac_permanent_beta * avg_participation_rate
+        temporary = stress * config.cost_model.ac_temporary_eta * max_participation_rate * portfolio_vol
+        impact_cost = float(permanent + temporary)
+    return float(base_cost + vol_cost + size_cost + liquidity_penalty + impact_cost)
+
+
+def _estimate_dollar_adv(
+    prices_row: pd.Series,
+    volume_window: pd.DataFrame,
+    tickers: list[str],
+) -> pd.Series:
+    if volume_window.empty:
+        avg_volume = pd.Series(np.nan, index=tickers, dtype=float)
+    else:
+        avg_volume = volume_window.reindex(columns=tickers).astype(float).mean(axis=0)
+    px = prices_row.reindex(tickers).astype(float)
+    dollar_adv = (px * avg_volume).replace([np.inf, -np.inf], np.nan)
+    return dollar_adv.clip(lower=1.0).fillna(np.inf)
+
+
+def _apply_execution_constraints(
+    target_weights: pd.Series,
+    prev_weights: pd.Series | None,
+    prices_row: pd.Series,
+    volume_window: pd.DataFrame,
+    wealth: float,
+    config: PipelineConfig,
+) -> tuple[pd.Series, dict[str, float]]:
+    target_weights = target_weights.astype(float).reindex(target_weights.index).fillna(0.0).clip(lower=0.0)
+    diagnostics = {
+        'turnover': 0.0,
+        'buy_turnover': 0.0,
+        'sell_turnover': 0.0,
+        'max_trade_change': 0.0,
+        'avg_participation_rate': 0.0,
+        'max_participation_rate': 0.0,
+        'adv_excess_ratio': 0.0,
+        'liquidity_scale': 1.0,
+        'adv_cap_hit': 0.0,
+    }
+    if prev_weights is None or len(prev_weights) == 0:
+        return target_weights, diagnostics
+
+    aligned_prev = prev_weights.reindex(target_weights.index).fillna(0.0).astype(float)
+    raw_trade = target_weights - aligned_prev
+    abs_trade = raw_trade.abs()
+    diagnostics['buy_turnover'] = float(raw_trade.clip(lower=0.0).sum())
+    diagnostics['sell_turnover'] = float((-raw_trade.clip(upper=0.0)).sum())
+
+    dollar_adv = _estimate_dollar_adv(prices_row, volume_window, list(target_weights.index))
+    trade_notional = abs_trade * max(float(wealth), 1e-8)
+    participation = (trade_notional / dollar_adv).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    max_participation = float(participation.max()) if len(participation) > 0 else 0.0
+    traded_mask = abs_trade > 1e-12
+    avg_participation = float(participation[traded_mask].mean()) if traded_mask.any() else 0.0
+
+    diagnostics['adv_excess_ratio'] = float(max(0.0, max_participation - config.cost_model.adv_participation_cap))
+    diagnostics['avg_participation_rate'] = avg_participation
+    diagnostics['max_participation_rate'] = max_participation
+
+    cap = float(config.cost_model.adv_participation_cap)
+    liquidity_scale = 1.0
+    if cap > 0.0 and np.isfinite(max_participation) and max_participation > cap:
+        liquidity_scale = float(np.clip(cap / (max_participation + 1e-12), 0.0, 1.0))
+        diagnostics['adv_cap_hit'] = 1.0
+
+    executed_weights = aligned_prev + raw_trade * liquidity_scale
+    executed_weights = executed_weights.clip(lower=0.0)
+    total_weight = float(executed_weights.sum())
+    if total_weight > 1.0:
+        executed_weights = executed_weights / total_weight
+
+    exec_trade = (executed_weights - aligned_prev).astype(float)
+    exec_abs_trade = exec_trade.abs()
+    exec_trade_notional = exec_abs_trade * max(float(wealth), 1e-8)
+    exec_participation = (exec_trade_notional / dollar_adv).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    exec_traded_mask = exec_abs_trade > 1e-12
+
+    diagnostics['turnover'] = float(exec_abs_trade.sum())
+    diagnostics['buy_turnover'] = float(exec_trade.clip(lower=0.0).sum())
+    diagnostics['sell_turnover'] = float((-exec_trade.clip(upper=0.0)).sum())
+    diagnostics['max_trade_change'] = float(exec_abs_trade.max()) if len(exec_abs_trade) > 0 else 0.0
+    diagnostics['avg_participation_rate'] = float(exec_participation[exec_traded_mask].mean()) if exec_traded_mask.any() else 0.0
+    diagnostics['max_participation_rate'] = float(exec_participation.max()) if len(exec_participation) > 0 else 0.0
+    diagnostics['liquidity_scale'] = liquidity_scale
+    return executed_weights, diagnostics
 
 
 def _net_portfolio_return(
     weights: pd.Series,
     daily_ret: pd.Series,
     risk_free_rate: float,
-    prev_weights: pd.Series | None,
+    execution_stats: dict[str, float] | None,
     portfolio_vol: float,
     config: PipelineConfig,
 ) -> tuple[float, float, float]:
@@ -63,14 +148,22 @@ def _net_portfolio_return(
     invested_ret = float((weights * daily_ret).sum())
     cash_weight = max(0.0, 1.0 - float(weights.sum()))
     net_ret = invested_ret + cash_weight * (risk_free_rate / 252.0)
-    turnover = 0.0
-    transaction_cost = 0.0
-    if prev_weights is not None and len(prev_weights) > 0:
-        aligned_prev = prev_weights.reindex(weights.index).fillna(0.0)
-        turnover = float(np.abs(weights.values - aligned_prev.values).sum())
-        max_trade_change = float(np.abs(weights.values - aligned_prev.values).max())
-        transaction_cost = _compute_transaction_cost(turnover, max_trade_change, portfolio_vol, config)
-        net_ret -= transaction_cost
+    stats = execution_stats or {}
+    turnover = float(stats.get('turnover', 0.0))
+    max_trade_change = float(stats.get('max_trade_change', 0.0))
+    avg_participation_rate = float(stats.get('avg_participation_rate', 0.0))
+    max_participation_rate = float(stats.get('max_participation_rate', 0.0))
+    adv_excess_ratio = float(stats.get('adv_excess_ratio', 0.0))
+    transaction_cost = _compute_transaction_cost(
+        turnover,
+        max_trade_change,
+        portfolio_vol,
+        config,
+        avg_participation_rate=avg_participation_rate,
+        max_participation_rate=max_participation_rate,
+        adv_excess_ratio=adv_excess_ratio,
+    )
+    net_ret -= transaction_cost
     return float(net_ret), float(turnover), float(transaction_cost)
 
 
@@ -89,15 +182,18 @@ def _build_feature_contracts(config: PipelineConfig) -> dict[str, str]:
         'macro': macro_contract,
         'sec_quality': sec_contract,
         'transaction_costs': (
-            f"{config.cost_model.base_cost_bps:.1f} bps base + "
-            f"{config.cost_model.turnover_vol_multiplier:.2f} * turnover * vol + "
-            f"{config.cost_model.size_penalty_bps:.1f} bps max-trade penalty"
+            f"{config.cost_model.base_cost_bps:.1f} bps base, stress x{config.cost_model.cost_stress_multiplier:.2f}, "
+            f"ADV cap {config.cost_model.adv_participation_cap:.1%}, delay {config.cost_model.execution_delay_days}d"
         ),
         'rebalancing': (
             f"Band {config.rebalance_band:.2%}, minimum turnover {config.min_turnover:.2%}"
         ),
         'optimizer': (
-            "Constrained long-only allocator with anchor, risk, turnover, and group caps"
+            (
+                "State-adaptive constrained long-only allocator with anchor, risk, turnover, and group caps"
+                if config.optimizer.adaptive_allocator
+                else "Constrained long-only allocator with anchor, risk, turnover, and group caps"
+            )
             if config.optimizer.use_optimizer
             else "Factor target used directly without constrained optimizer"
         ),
@@ -212,6 +308,7 @@ def run_full_pipeline(
     # Market return for regime detection
     market_ret = returns[tickers].mean(axis=1)
     _portfolio_vol_20d = returns[tickers].rolling(20).std().mean(axis=1)
+    execution_queue: list[pd.Series] = []
 
     # Storage
     wealth = 1.0
@@ -232,6 +329,11 @@ def run_full_pipeline(
         'drawdowns': [], 'spy_drawdowns': [],
         'turnover': [], 'hedge_pnl': [], 'source_weights_hist': [],
         'transaction_costs': [],
+        'desired_turnover': [], 'buy_turnover': [], 'sell_turnover': [],
+        'avg_participation_rates': [], 'max_participation_rates': [],
+        'liquidity_scales': [], 'adv_cap_hits': [], 'adv_excess_ratios': [],
+        'execution_weight_gaps': [], 'execution_delay_gaps': [],
+        'execution_shortfalls': [], 'execution_delay_days': [],
         'portfolio_returns': [], 'cash_weights': [], 'hedge_ratios': [],
         'alpha_dispersion': [], 'regime_entropy': [], 'ic_instability': [],
         'garch_vol_uncertainty': [], 'uncertainty_score': [],
@@ -248,6 +350,15 @@ def run_full_pipeline(
         'mlp_meta_gate_source': [], 'mlp_meta_n_training_samples': [],
         'mpc_invested_targets': [], 'mpc_stabilizer_mixes': [],
         'mpc_plan_steps': [], 'mpc_plan_sources': [], 'mpc_plan_objectives': [],
+        'adaptive_allocator_stress_scores': [],
+        'adaptive_allocator_invested_targets': [],
+        'adaptive_allocator_risk_mults': [],
+        'adaptive_allocator_anchor_mults': [],
+        'adaptive_allocator_turnover_mults': [],
+        'adaptive_allocator_alpha_mults': [],
+        'adaptive_allocator_cap_scales': [],
+        'adaptive_allocator_group_cap_scales': [],
+        'adaptive_allocator_max_weights': [],
         'cmdp_lambdas': [], 'cmdp_constraint_costs': [], 'cmdp_violations': [],
         'control_method': control_method,
     }
@@ -289,6 +400,11 @@ def run_full_pipeline(
                 _macro_last_compute = t
             regime_belief = 0.75 * regime_belief + 0.25 * _macro_belief_cache
 
+        portfolio_vol = _portfolio_vol_20d.iloc[t - 1] if t > 20 else returns[tickers].iloc[:t].std().mean()
+        prev_weights = None
+        if results['portfolio_weights']:
+            prev_weights = pd.Series(results['portfolio_weights'][-1], index=tickers)
+        recent_returns = returns[tickers].iloc[max(0, t - 126):t]
         # --- Signal Combination ---
         expected, confidence, source_signals, source_weights = combiner.combine(
             factor_scores, garch_vols, regime_belief, tickers,
@@ -310,30 +426,24 @@ def run_full_pipeline(
             0.0, 1.0,
         ))
 
-        portfolio_vol = _portfolio_vol_20d.iloc[t - 1] if t > 20 else returns[tickers].iloc[:t].std().mean()
-        prev_weights = None
-        if results['portfolio_weights']:
-            prev_weights = pd.Series(results['portfolio_weights'][-1], index=tickers)
-        recent_returns = returns[tickers].iloc[max(0, t - 126):t]
-
         # ================================================================
         # CONTROL LAYER
         # ================================================================
         invested_fraction_selected = 1.0
         overlay_size_selected = 0.0
         action = 0
-        ctrl_state = None
+        allocator_state = build_control_state(
+            alpha_scores=expected,
+            portfolio_weights=prev_weights,
+            recent_returns=recent_returns,
+            regime_belief=regime_belief,
+            wealth_path=results['wealth'],
+            t=t,
+        )
+        ctrl_state = allocator_state if use_new_controller and controller is not None else None
         expert_feedback: dict[str, float] | None = None
 
         if use_new_controller and controller is not None:
-            ctrl_state = build_control_state(
-                alpha_scores=expected,
-                portfolio_weights=prev_weights,
-                recent_returns=recent_returns,
-                regime_belief=regime_belief,
-                wealth_path=results['wealth'],
-                t=t,
-            )
             if controller.uses_direct_weights():
                 built_weights = controller.build_target_weights(
                     allocator=allocator,
@@ -363,6 +473,7 @@ def run_full_pipeline(
                     confidence=confidence,
                     recent_returns=recent_returns,
                     prev_weights=prev_weights,
+                    control_state=allocator_state,
                 )
                 weights = weights * invested_fraction_selected
                 cash_weight = max(0.0, 1.0 - float(weights.sum()))
@@ -377,6 +488,7 @@ def run_full_pipeline(
             weights, cash_weight = allocator.construct_portfolio(
                 factor_scores, expected, confidence, action,
                 recent_returns=recent_returns, prev_weights=prev_weights,
+                control_state=allocator_state,
             )
             if prev_weights is not None:
                 weights = allocator.apply_rebalance_band(weights, prev_weights)
@@ -387,6 +499,7 @@ def run_full_pipeline(
             weights, cash_weight = allocator.construct_allocator_only(
                 factor_scores, expected, confidence,
                 recent_returns=recent_returns, prev_weights=prev_weights,
+                control_state=allocator_state,
             )
             if prev_weights is not None:
                 weights = allocator.apply_rebalance_band(weights, prev_weights)
@@ -399,20 +512,68 @@ def run_full_pipeline(
         prev_weight_series = None
         if results['portfolio_weights']:
             prev_weight_series = pd.Series(results['portfolio_weights'][-1], index=tickers)
+        desired_weights = weights.copy()
+        desired_turnover = 0.0
+        desired_cash_weight = max(0.0, 1.0 - float(desired_weights.sum()))
+        if prev_weight_series is not None and len(prev_weight_series) > 0:
+            desired_turnover = float(
+                np.abs(
+                    desired_weights.reindex(tickers).fillna(0.0).values
+                    - prev_weight_series.reindex(tickers).fillna(0.0).values
+                ).sum()
+            )
+
+        executed_target_weights = desired_weights
+        if config.cost_model.execution_delay_days > 0 and prev_weight_series is not None and len(prev_weight_series) > 0:
+            execution_queue.append(desired_weights.copy())
+            if len(execution_queue) > int(config.cost_model.execution_delay_days):
+                executed_target_weights = execution_queue.pop(0)
+            else:
+                executed_target_weights = prev_weight_series.copy()
+
+        prices_row = prices[tickers].iloc[t - 1] if t > 0 else prices[tickers].iloc[t]
+        volume_window = volumes[tickers].iloc[max(0, t - config.cost_model.adv_lookback_days):t]
+        executed_weights, execution_stats = _apply_execution_constraints(
+            target_weights=executed_target_weights,
+            prev_weights=prev_weight_series,
+            prices_row=prices_row,
+            volume_window=volume_window,
+            wealth=results['wealth'][-1],
+            config=config,
+        )
+        weights = executed_weights
+        cash_weight = max(0.0, 1.0 - float(weights.sum()))
+        desired_gross_ret = float((desired_weights * daily_ret).sum()) + desired_cash_weight * (RISK_FREE_RATE / 252.0)
         raw_portfolio_ret, turnover, transaction_cost = _net_portfolio_return(
             weights=weights,
             daily_ret=daily_ret,
             risk_free_rate=RISK_FREE_RATE,
-            prev_weights=prev_weight_series,
+            execution_stats=execution_stats,
             portfolio_vol=portfolio_vol,
             config=config,
         )
         portfolio_ret = raw_portfolio_ret
+        execution_weight_gap = float(
+            np.abs(
+                desired_weights.reindex(tickers).fillna(0.0).values
+                - weights.reindex(tickers).fillna(0.0).values
+            ).sum()
+        )
+        execution_delay_gap = float(
+            np.abs(
+                desired_weights.reindex(tickers).fillna(0.0).values
+                - executed_target_weights.reindex(tickers).fillna(0.0).values
+            ).sum()
+        )
+        execution_shortfall = float(desired_gross_ret - raw_portfolio_ret)
 
-        controller_diagnostics = controller.current_diagnostics() if controller is not None else {}
+        controller_diagnostics = allocator.current_allocator_diagnostics()
         if use_new_controller and controller is not None and ctrl_state is not None:
             portfolio_ret, convexity_diagnostics = controller.apply_return_overlay(portfolio_ret, ctrl_state)
-            controller_diagnostics = controller.current_diagnostics()
+            controller_diagnostics = {
+                **controller_diagnostics,
+                **controller.current_diagnostics(),
+            }
             overlay_size_selected = float(controller_diagnostics.get('overlay_size', overlay_size_selected))
         else:
             convexity_diagnostics = {
@@ -433,7 +594,7 @@ def run_full_pipeline(
                     weights=eval_weights,
                     daily_ret=daily_ret,
                     risk_free_rate=RISK_FREE_RATE,
-                    prev_weights=prev_weight_series,
+                    execution_stats=None,
                     portfolio_vol=portfolio_vol,
                     config=config,
                 )
@@ -555,7 +716,12 @@ def run_full_pipeline(
                 allocator.epsilon = max(0.01, allocator.epsilon * 0.9998)
 
         if use_new_controller and controller is not None:
-            controller_diagnostics = controller.current_diagnostics()
+            controller_diagnostics = {
+                **allocator.current_allocator_diagnostics(),
+                **controller.current_diagnostics(),
+            }
+        else:
+            controller_diagnostics = allocator.current_allocator_diagnostics()
 
         # Store results
         results['dates'].append(dates[t])
@@ -580,6 +746,18 @@ def run_full_pipeline(
         results['spy_drawdowns'].append((spy_wealth - spy_peak) / spy_peak)
         results['turnover'].append(turnover)
         results['transaction_costs'].append(transaction_cost)
+        results['desired_turnover'].append(desired_turnover)
+        results['buy_turnover'].append(float(execution_stats.get('buy_turnover', 0.0)))
+        results['sell_turnover'].append(float(execution_stats.get('sell_turnover', 0.0)))
+        results['avg_participation_rates'].append(float(execution_stats.get('avg_participation_rate', 0.0)))
+        results['max_participation_rates'].append(float(execution_stats.get('max_participation_rate', 0.0)))
+        results['liquidity_scales'].append(float(execution_stats.get('liquidity_scale', 1.0)))
+        results['adv_cap_hits'].append(float(execution_stats.get('adv_cap_hit', 0.0)))
+        results['adv_excess_ratios'].append(float(execution_stats.get('adv_excess_ratio', 0.0)))
+        results['execution_weight_gaps'].append(execution_weight_gap)
+        results['execution_delay_gaps'].append(execution_delay_gap)
+        results['execution_shortfalls'].append(execution_shortfall)
+        results['execution_delay_days'].append(int(config.cost_model.execution_delay_days))
         results['hedge_pnl'].append(0.0)
         results['hedge_costs'].append(0.0)
         results['hedge_benefits'].append(0.0)
@@ -624,6 +802,15 @@ def run_full_pipeline(
         results['mpc_plan_steps'].append(int(controller_diagnostics.get('mpc_plan_step', 0)))
         results['mpc_plan_sources'].append(str(controller_diagnostics.get('mpc_plan_source', 'none')))
         results['mpc_plan_objectives'].append(float(controller_diagnostics.get('mpc_plan_objective', 0.0)))
+        results['adaptive_allocator_stress_scores'].append(float(controller_diagnostics.get('adaptive_allocator_stress_score', 0.0)))
+        results['adaptive_allocator_invested_targets'].append(float(controller_diagnostics.get('adaptive_allocator_invested_target', invested_fraction_selected)))
+        results['adaptive_allocator_risk_mults'].append(float(controller_diagnostics.get('adaptive_allocator_risk_mult', 1.0)))
+        results['adaptive_allocator_anchor_mults'].append(float(controller_diagnostics.get('adaptive_allocator_anchor_mult', 1.0)))
+        results['adaptive_allocator_turnover_mults'].append(float(controller_diagnostics.get('adaptive_allocator_turnover_mult', 1.0)))
+        results['adaptive_allocator_alpha_mults'].append(float(controller_diagnostics.get('adaptive_allocator_alpha_mult', 1.0)))
+        results['adaptive_allocator_cap_scales'].append(float(controller_diagnostics.get('adaptive_allocator_cap_scale', 1.0)))
+        results['adaptive_allocator_group_cap_scales'].append(float(controller_diagnostics.get('adaptive_allocator_group_cap_scale', 1.0)))
+        results['adaptive_allocator_max_weights'].append(float(controller_diagnostics.get('adaptive_allocator_max_weight', config.optimizer.max_weight)))
         results['cmdp_lambdas'].append(float(controller_diagnostics.get('cmdp_lambda', 0.0)))
         results['cmdp_constraint_costs'].append(float(controller_diagnostics.get('cmdp_constraint_cost', 0.0)))
         results['cmdp_violations'].append(float(controller_diagnostics.get('cmdp_violation', 0.0)))

@@ -33,6 +33,7 @@ DISPLAY_LABELS = {
     "D_cvar_robust": "D CVaR robust",
     "D_plus_convexity": "D+ Convexity",
     "H_mpc": "H MPC",
+    "I_adaptive_allocator": "I Adaptive allocator",
     "E_council": "E Council",
     "E_plus_convexity": "E+ Council + convexity",
     "G_mlp_meta": "G MLP meta",
@@ -114,7 +115,7 @@ def family_of(label: str) -> str:
         return "supervised"
     if label.startswith("D"):
         return "robust"
-    if label.startswith("H"):
+    if label.startswith("H") or label.startswith("I"):
         return "predictive"
     if label.startswith("E") or label.startswith("G"):
         return "meta"

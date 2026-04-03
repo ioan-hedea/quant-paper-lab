@@ -8,7 +8,7 @@ so they can be compared on equal footing. Each controller receives a
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -622,8 +622,18 @@ class CVaRRobustController(BaseController):
         state: ControlState,
     ) -> pd.Series | None:
         self.compute_invested_fraction(state)
-        base_target = allocator.build_factor_target(
-            factor_scores, confidence, recent_returns,
+        adapted_optimizer = allocator.adapt_optimizer_config(
+            optimizer_config=optimizer_config,
+            control_state=state,
+        )
+        base_target = allocator.optimize_target_book(
+            factor_scores=factor_scores,
+            alpha_scores=alpha_scores,
+            confidence=confidence,
+            recent_returns=recent_returns,
+            prev_weights=prev_weights,
+            optimizer_config=adapted_optimizer,
+            adapt_config=False,
         )
         return self.optimize_with_cvar(
             base_target=base_target,
@@ -631,7 +641,7 @@ class CVaRRobustController(BaseController):
             confidence=confidence,
             recent_returns=recent_returns,
             prev_weights=prev_weights,
-            optimizer_config=optimizer_config,
+            optimizer_config=adapted_optimizer,
         )
 
     def optimize_with_cvar(
@@ -863,6 +873,7 @@ class CouncilController(BaseController):
             confidence=confidence,
             recent_returns=recent_returns,
             prev_weights=prev_weights,
+            control_state=state,
         ).clip(lower=0.0)
         constrained_target = constrained_target / (constrained_target.sum() + 1e-8)
 
@@ -1341,6 +1352,7 @@ class MLPMetaController(BaseController):
             confidence=confidence,
             recent_returns=recent_returns,
             prev_weights=prev_weights,
+            control_state=state,
         ).clip(lower=0.0)
         constrained_target = constrained_target / (constrained_target.sum() + 1e-8)
 
@@ -1663,6 +1675,7 @@ class MPCController(BaseController):
             confidence=confidence,
             recent_returns=recent_returns,
             prev_weights=prev_weights,
+            control_state=state,
         ).reindex(tickers).fillna(0.0).clip(lower=0.0)
         alpha_book = alpha_book / (float(alpha_book.sum()) + 1e-8)
         stabilizer_book = allocator.estimate_min_var_core(
@@ -1747,6 +1760,174 @@ class MPCController(BaseController):
         self._plan = []
         self._plan_source = 'none'
         self._last_plan_objective = 0.0
+
+
+# ============================================================
+# I: Decision-Aware Allocator
+# ============================================================
+
+class AdaptiveAllocatorController(BaseController):
+    """Controller that endogenizes allocator parameters from state.
+
+    Instead of only scaling a fixed allocator output, this controller maps
+    the current control state to a small allocator parameter vector
+    ``theta_t`` and then solves the constrained target-book optimization
+    with those adapted settings:
+
+        w_t = Allocator(alpha_t, theta_t),   theta_t = pi(x_t)
+
+    The policy is intentionally compact and interpretable. It adjusts risk,
+    anchor, turnover, alpha strength, position caps, and group caps as a
+    function of stress, alpha quality, concentration, and trend.
+    """
+
+    label = 'adaptive_allocator'
+
+    def __init__(self, config: ControlConfig) -> None:
+        super().__init__(config)
+        self.min_invested = float(config.adaptive_allocator_min_invested)
+        self.param_smoothing = float(np.clip(config.adaptive_allocator_param_smoothing, 0.0, 0.95))
+        self.risk_mult_range = tuple(config.adaptive_allocator_risk_mult_range)
+        self.anchor_mult_range = tuple(config.adaptive_allocator_anchor_mult_range)
+        self.turnover_mult_range = tuple(config.adaptive_allocator_turnover_mult_range)
+        self.alpha_mult_range = tuple(config.adaptive_allocator_alpha_mult_range)
+        self.cap_scale_range = tuple(config.adaptive_allocator_cap_scale_range)
+        self.group_cap_scale_range = tuple(config.adaptive_allocator_group_cap_scale_range)
+        self.policy_version = int(config.adaptive_allocator_policy_version)
+        self._smoothed_theta: dict[str, float] | None = None
+
+    @staticmethod
+    def _interp(bounds: tuple[float, float], signal: float) -> float:
+        low, high = map(float, bounds)
+        clipped = float(np.clip(signal, 0.0, 1.0))
+        return low + (high - low) * clipped
+
+    def _stress_score(self, state: ControlState) -> float:
+        dd_component = float(np.clip((-state.recent_drawdown - 0.02) / 0.16, 0.0, 1.0))
+        vol_component = float(np.clip((state.recent_vol - 0.14) / 0.20, 0.0, 1.0))
+        regime_component = float(np.clip((0.52 - state.regime_belief) / 0.42, 0.0, 1.0))
+        concentration_component = float(np.clip((state.concentration - 0.16) / 0.20, 0.0, 1.0))
+        return float(np.clip(
+            0.40 * dd_component
+            + 0.28 * vol_component
+            + 0.22 * regime_component
+            + 0.10 * concentration_component,
+            0.0,
+            1.0,
+        ))
+
+    def _policy(self, state: ControlState, optimizer_config) -> tuple[object, float]:
+        stress = self._stress_score(state)
+        alpha_boost = float(np.tanh(6.0 * state.alpha_strength))
+        trend_signal = float(np.tanh(2.0 * state.trend))
+        concentration_penalty = float(np.clip((state.concentration - 0.16) / 0.18, 0.0, 1.0))
+
+        risk_signal = float(np.clip(0.35 + 0.60 * stress + 0.15 * concentration_penalty - 0.18 * alpha_boost, 0.0, 1.0))
+        anchor_signal = float(np.clip(0.25 + 0.55 * stress + 0.20 * concentration_penalty - 0.10 * trend_signal, 0.0, 1.0))
+        turnover_signal = float(np.clip(0.20 + 0.65 * stress + 0.15 * concentration_penalty, 0.0, 1.0))
+        alpha_signal = float(np.clip(0.35 + 0.28 * alpha_boost + 0.12 * trend_signal - 0.20 * stress, 0.0, 1.0))
+        cap_signal = float(np.clip(0.62 - 0.35 * stress + 0.28 * alpha_boost - 0.18 * concentration_penalty, 0.0, 1.0))
+        group_signal = float(np.clip(0.70 - 0.32 * stress + 0.10 * alpha_boost, 0.0, 1.0))
+
+        raw_theta = {
+            'risk_mult': self._interp(self.risk_mult_range, risk_signal),
+            'anchor_mult': self._interp(self.anchor_mult_range, anchor_signal),
+            'turnover_mult': self._interp(self.turnover_mult_range, turnover_signal),
+            'alpha_mult': self._interp(self.alpha_mult_range, alpha_signal),
+            'cap_scale': self._interp(self.cap_scale_range, cap_signal),
+            'group_cap_scale': self._interp(self.group_cap_scale_range, group_signal),
+        }
+
+        if self._smoothed_theta is None:
+            theta = raw_theta
+        else:
+            theta = {
+                key: float(
+                    self.param_smoothing * self._smoothed_theta[key]
+                    + (1.0 - self.param_smoothing) * raw_theta[key]
+                )
+                for key in raw_theta
+            }
+        self._smoothed_theta = dict(theta)
+
+        invested = float(np.clip(
+            0.94
+            + 0.05 * alpha_boost
+            + 0.04 * trend_signal
+            - 0.22 * stress
+            - 0.10 * max(0.0, -state.recent_drawdown - 0.05),
+            self.min_invested,
+            1.0,
+        ))
+
+        max_weight = float(np.clip(
+            optimizer_config.max_weight * theta['cap_scale'],
+            0.05,
+            0.30,
+        ))
+        group_caps = {
+            group: float(np.clip(cap * theta['group_cap_scale'], 0.10, 1.0))
+            for group, cap in optimizer_config.group_caps.items()
+        }
+        adapted_config = replace(
+            optimizer_config,
+            risk_aversion=float(optimizer_config.risk_aversion * theta['risk_mult']),
+            anchor_strength=float(optimizer_config.anchor_strength * theta['anchor_mult']),
+            turnover_penalty=float(optimizer_config.turnover_penalty * theta['turnover_mult']),
+            alpha_strength=float(optimizer_config.alpha_strength * theta['alpha_mult']),
+            max_weight=max_weight,
+            group_caps=group_caps,
+        )
+
+        self._latest_diagnostics.update({
+            'adaptive_allocator_policy_version': self.policy_version,
+            'adaptive_allocator_stress_score': float(stress),
+            'adaptive_allocator_invested_target': float(invested),
+            'adaptive_allocator_risk_mult': float(theta['risk_mult']),
+            'adaptive_allocator_anchor_mult': float(theta['anchor_mult']),
+            'adaptive_allocator_turnover_mult': float(theta['turnover_mult']),
+            'adaptive_allocator_alpha_mult': float(theta['alpha_mult']),
+            'adaptive_allocator_cap_scale': float(theta['cap_scale']),
+            'adaptive_allocator_group_cap_scale': float(theta['group_cap_scale']),
+            'adaptive_allocator_max_weight': float(max_weight),
+            'overlay_size': 0.0,
+        })
+        return adapted_config, invested
+
+    def compute_invested_fraction(self, state: ControlState) -> float:
+        return float(np.clip(state.invested_fraction, self.min_invested, 1.0))
+
+    def uses_direct_weights(self) -> bool:
+        return True
+
+    def build_target_weights(
+        self,
+        allocator,
+        factor_scores: pd.Series,
+        alpha_scores: pd.Series,
+        confidence: pd.Series,
+        recent_returns: pd.DataFrame | None,
+        prev_weights: pd.Series | None,
+        optimizer_config,
+        state: ControlState,
+    ) -> pd.Series | None:
+        adapted_config, invested = self._policy(state, optimizer_config)
+        dynamic_target = allocator.optimize_target_book(
+            factor_scores=factor_scores,
+            alpha_scores=alpha_scores,
+            confidence=confidence,
+            recent_returns=recent_returns,
+            prev_weights=prev_weights,
+            optimizer_config=adapted_config,
+            adapt_config=False,
+        ).reindex(factor_scores.index).fillna(0.0).clip(lower=0.0)
+        target_sum = float(dynamic_target.sum())
+        if target_sum > 1e-8:
+            dynamic_target = dynamic_target / target_sum
+        return float(invested) * dynamic_target
+
+    def reset(self) -> None:
+        self._smoothed_theta = None
 
 
 # Q-Learning Controller (wraps existing PortfolioConstructionRL)
@@ -1869,6 +2050,7 @@ def build_controller(config: ControlConfig) -> BaseController:
         'council': CouncilController,
         'mlp_meta': MLPMetaController,
         'mpc': MPCController,
+        'adaptive_allocator': AdaptiveAllocatorController,
         'cmdp_lagrangian': CMDPLagrangianController,
         'q_learning': QLearningController,
     }

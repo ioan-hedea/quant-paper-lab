@@ -110,8 +110,7 @@ Extensions built on top of strong baselines:
 - `quant_pipeline.py`: thin wrapper for a single pipeline run
 - `quant_research.py`: full research runner
 - `scripts/generate_control_story_plots.py`: paper-facing plot generation from archived results bundles
-- `paper/1col/`: one-column manuscript source and PDF
-- `paper/2col/`: two-column manuscript source, generated tables, and PDF
+- `paper/2col/`: final two-column manuscript source, generated tables, and PDF
 - `checkpoints/research_runs/universe_A/`: Universe A cached run PKLs and progress manifest
 - `checkpoints/research_runs/universe_B/`: Universe B cached run PKLs and progress manifest
 - `results/`: timestamped research bundles
@@ -309,12 +308,11 @@ This is intended to support the broader question:
 
 ## Paper Files
 
-Built PDFs:
+Built PDF:
 
-- [paper/1col/quant_pipeline_report.pdf](paper/1col/quant_pipeline_report.pdf)
-- [paper/2col/quant_pipeline_report_2col.pdf](paper/2col/quant_pipeline_report_2col.pdf)
+- [paper/2col/quant_pipeline_paper_2col.pdf](paper/2col/quant_pipeline_paper_2col.pdf)
 
-The two-column paper is the main submission-style version.
+The repo now keeps only the two-column submission-style paper track.
 
 ## Reproducibility
 

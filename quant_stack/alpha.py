@@ -1,6 +1,7 @@
 """Alpha models and signal-combination components for the quant trading pipeline."""
 
 from collections import deque
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,16 @@ from statsmodels.tools import add_constant
 from statsmodels.tsa.stattools import adfuller, coint
 
 from .config import PAIRS_CANDIDATES, TICKER_TO_GROUP, UNIVERSE
+
+
+@dataclass
+class AlphaFeedbackState:
+    """Minimal closed-loop state passed back into the alpha combiner."""
+
+    prev_weights: pd.Series | None = None
+    prev_invested_fraction: float = 0.0
+    prev_overlay_size: float = 0.0
+    prev_drawdown: float = 0.0
 
 class FamaFrenchFactors:
     """
@@ -489,6 +500,17 @@ class AlphaCombiner:
         self.base_weights = {'factor': 0.60, 'garch': 0.25, 'hmm': 0.15}
         self.source_skill = {source: 0.0 for source in self.base_weights}
         self.ic_history = {source: deque(maxlen=lookback) for source in self.base_weights}
+        self._latest_feedback_diagnostics = {
+            'alpha_feedback_enabled': 0,
+            'alpha_feedback_factor_weight': self.base_weights['factor'],
+            'alpha_feedback_garch_weight': self.base_weights['garch'],
+            'alpha_feedback_hmm_weight': self.base_weights['hmm'],
+            'alpha_feedback_crowding_penalty': 0.0,
+            'alpha_feedback_regime_tilt': 0.0,
+            'alpha_feedback_shrink': 0.0,
+            'alpha_feedback_intensity': 0.0,
+            'alpha_feedback_concentration': 0.0,
+        }
 
     @staticmethod
     def _zscore(series: pd.Series) -> pd.Series:
@@ -534,6 +556,127 @@ class AlphaCombiner:
         total = sum(raw.values()) + 1e-8
         return {source: weight / total for source, weight in raw.items()}
 
+    def current_feedback_diagnostics(self) -> dict[str, float | int]:
+        return dict(self._latest_feedback_diagnostics)
+
+    def _normalize_weights(self, raw_weights: dict[str, float]) -> dict[str, float]:
+        total = float(sum(max(0.0, weight) for weight in raw_weights.values())) + 1e-8
+        return {
+            source: float(max(0.0, weight) / total)
+            for source, weight in raw_weights.items()
+        }
+
+    def _apply_closed_loop_feedback(
+        self,
+        raw_alpha: pd.Series,
+        source_signals: dict[str, pd.Series],
+        source_weights: dict[str, float],
+        hmm_signal: pd.Series,
+        tickers: list[str],
+        feedback_state: AlphaFeedbackState | None,
+        feedback_config,
+    ) -> tuple[pd.Series, dict[str, float]]:
+        diagnostics = {
+            'alpha_feedback_enabled': 0,
+            'alpha_feedback_factor_weight': float(source_weights['factor']),
+            'alpha_feedback_garch_weight': float(source_weights['garch']),
+            'alpha_feedback_hmm_weight': float(source_weights['hmm']),
+            'alpha_feedback_crowding_penalty': 0.0,
+            'alpha_feedback_regime_tilt': 0.0,
+            'alpha_feedback_shrink': 0.0,
+            'alpha_feedback_intensity': 0.0,
+            'alpha_feedback_concentration': 0.0,
+        }
+        if (
+            feedback_config is None
+            or not bool(getattr(feedback_config, 'enabled', False))
+            or feedback_state is None
+        ):
+            return self._zscore(raw_alpha), diagnostics
+
+        prev_weights = pd.Series(
+            0.0 if feedback_state.prev_weights is None else feedback_state.prev_weights,
+            index=tickers,
+            dtype=float,
+        ).reindex(tickers).fillna(0.0).clip(lower=0.0)
+        prev_invested = float(np.clip(feedback_state.prev_invested_fraction, 0.0, 1.0))
+        prev_drawdown = float(feedback_state.prev_drawdown)
+
+        if prev_invested > 1e-8:
+            normalized_prev = prev_weights / prev_invested
+            concentration = float((normalized_prev ** 2).sum())
+        else:
+            normalized_prev = prev_weights * 0.0
+            concentration = 0.0
+
+        stress = float(np.clip((-prev_drawdown - 0.02) / 0.16, 0.0, 1.0))
+        concentration_penalty = float(np.clip((concentration - 0.16) / 0.22, 0.0, 1.0))
+        # Closed-loop alpha should react to genuine market stress, not to
+        # prior defensive actions by themselves. We therefore gate all
+        # feedback intensity through a stress activation threshold.
+        stress_active = float(np.clip((stress - 0.35) / 0.65, 0.0, 1.0))
+
+        factor_scale = float(np.clip(
+            1.0 - feedback_config.exposure_reweight_strength * (0.75 * stress_active + 0.25 * stress_active * concentration_penalty),
+            0.88,
+            1.08,
+        ))
+        garch_scale = float(np.clip(
+            1.0 + feedback_config.cash_garch_boost * stress_active,
+            0.95,
+            1.18,
+        ))
+        hmm_scale = float(np.clip(
+            1.0 + feedback_config.cash_hmm_boost * stress_active,
+            0.95,
+            1.24,
+        ))
+        adjusted_weights = self._normalize_weights({
+            'factor': source_weights['factor'] * factor_scale,
+            'garch': source_weights['garch'] * garch_scale,
+            'hmm': source_weights['hmm'] * hmm_scale,
+        })
+        adjusted_raw_alpha = (
+            adjusted_weights['factor'] * source_signals['factor']
+            + adjusted_weights['garch'] * source_signals['garch']
+            + adjusted_weights['hmm'] * source_signals['hmm']
+        )
+
+        crowding_signal = -self._zscore(normalized_prev) if prev_invested > 1e-8 else pd.Series(0.0, index=tickers)
+        crowding_strength = float(
+            feedback_config.crowded_name_penalty_strength
+            * stress_active
+            * prev_invested
+            * (0.25 + 0.75 * concentration_penalty)
+        )
+        regime_strength = float(
+            feedback_config.action_regime_feedback_strength * stress_active
+        )
+        shrink = float(np.clip(
+            feedback_config.shrink_in_stress_strength * stress_active,
+            0.0,
+            0.18,
+        ))
+
+        adjusted_alpha = (
+            (1.0 - shrink) * adjusted_raw_alpha
+            + crowding_strength * crowding_signal
+            + regime_strength * hmm_signal
+        )
+        diagnostics = {
+            'alpha_feedback_enabled': 1,
+            'alpha_feedback_factor_weight': float(adjusted_weights['factor']),
+            'alpha_feedback_garch_weight': float(adjusted_weights['garch']),
+            'alpha_feedback_hmm_weight': float(adjusted_weights['hmm']),
+            'alpha_feedback_crowding_penalty': float(crowding_strength),
+            'alpha_feedback_regime_tilt': float(regime_strength),
+            'alpha_feedback_shrink': float(shrink),
+            'alpha_feedback_intensity': float(crowding_strength + regime_strength + shrink),
+            'alpha_feedback_concentration': float(concentration),
+            'alpha_feedback_stress_active': float(stress_active),
+        }
+        return self._zscore(adjusted_alpha), diagnostics
+
     def update_signal_quality(self, source_signals, realized_returns):
         for source, signals in source_signals.items():
             aligned = pd.concat([signals, realized_returns], axis=1).dropna()
@@ -569,6 +712,8 @@ class AlphaCombiner:
         tickers,
         use_factor=True,
         adaptive=True,
+        feedback_state: AlphaFeedbackState | None = None,
+        feedback_config=None,
     ):
         """
         Weighted combination of the factor, GARCH, and HMM sleeves.
@@ -584,14 +729,27 @@ class AlphaCombiner:
             'garch': garch_signal,
             'hmm': hmm_signal,
         }
-        source_weights = self.get_source_weights(adaptive=adaptive)
-
-        raw_alpha = (
-            source_weights['factor'] * source_signals['factor']
-            + source_weights['garch'] * source_signals['garch']
-            + source_weights['hmm'] * source_signals['hmm']
+        base_source_weights = self.get_source_weights(adaptive=adaptive)
+        base_raw_alpha = (
+            base_source_weights['factor'] * source_signals['factor']
+            + base_source_weights['garch'] * source_signals['garch']
+            + base_source_weights['hmm'] * source_signals['hmm']
         )
-        alpha.loc[:] = raw_alpha.values
+        alpha, feedback_diagnostics = self._apply_closed_loop_feedback(
+            raw_alpha=base_raw_alpha,
+            source_signals=source_signals,
+            source_weights=base_source_weights,
+            hmm_signal=hmm_signal,
+            tickers=tickers,
+            feedback_state=feedback_state,
+            feedback_config=feedback_config,
+        )
+        source_weights = {
+            'factor': float(feedback_diagnostics['alpha_feedback_factor_weight']),
+            'garch': float(feedback_diagnostics['alpha_feedback_garch_weight']),
+            'hmm': float(feedback_diagnostics['alpha_feedback_hmm_weight']),
+        }
+        self._latest_feedback_diagnostics = feedback_diagnostics
 
         # Confidence remains a volatility-aware scaling of the target book.
         if len(garch_vols) > 0:
