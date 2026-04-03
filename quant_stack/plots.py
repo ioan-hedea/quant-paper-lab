@@ -8,6 +8,13 @@ import pandas as pd
 from pathlib import Path
 
 from .config import RISK_FREE_RATE
+from .evaluation_helpers import (
+    _build_ablation_summary,
+    _build_control_comparison_summary,
+    _control_color,
+    _display_label,
+    _pareto_frontier_points,
+)
 from .rl import ExecutionRL
 
 def plot_alpha_models(results, prices, returns):
@@ -825,3 +832,154 @@ def plot_reward_ablation(
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {output_path}")
+
+
+def plot_research_evaluation(
+    metrics: pd.DataFrame,
+    regime_summary: pd.DataFrame,
+    baseline_results: dict[str, object] | None = None,
+    rolling_references: pd.DataFrame | None = None,
+    output_path: Path = Path('pipeline_research_eval.png'),
+    frontier_output_path: Path = Path('control_pareto_frontier.png'),
+) -> None:
+    """Create the paper-facing research summary and frontier figures."""
+    del regime_summary
+
+    fig, axes = plt.subplots(2, 3, figsize=(20, 11))
+    fig.suptitle(
+        'Research Story: Control Comparison, Legacy Ablation, and Robustness',
+        fontsize=15,
+        fontweight='bold',
+    )
+
+    control_summary = _build_control_comparison_summary(metrics)
+    ablation_summary = _build_ablation_summary(metrics)
+
+    ax = axes[0, 0]
+    if baseline_results is not None:
+        dates = baseline_results.get('dates', [])
+        wealth = np.asarray(baseline_results.get('wealth', [1.0])[1:], dtype=float)
+        spy = np.asarray(baseline_results.get('spy', [1.0])[1:], dtype=float)
+        factor = np.asarray(baseline_results.get('factor', [1.0])[1:], dtype=float)
+        voltarget = np.asarray(baseline_results.get('voltarget', [1.0])[1:], dtype=float)
+        ddlever = np.asarray(baseline_results.get('ddlever', [1.0])[1:], dtype=float)
+        e2e_rl = np.asarray(baseline_results.get('e2e_rl', [1.0])[1:], dtype=float)
+        if len(dates) == len(wealth):
+            ax.plot(dates, wealth, color='#1f77b4', linewidth=2, label='Full Pipeline')
+            ax.plot(dates, factor, color='#ff7f0e', linewidth=1.5, label='Factor Benchmark')
+            ax.plot(dates, voltarget, color='#2ca02c', linewidth=1.3, linestyle='-.', label='Vol-Target')
+            ax.plot(dates, ddlever, color='#9467bd', linewidth=1.3, linestyle=':', label='DD-Delever')
+            if len(e2e_rl) == len(dates):
+                ax.plot(dates, e2e_rl, color='#d62728', linewidth=1.3, linestyle='--', label='E2E RL (PPO)')
+            ax.plot(dates, spy, color='black', linewidth=1.2, linestyle='--', label='SPY')
+            ax.legend(fontsize=6, ncol=2)
+    ax.set_title('Legacy Full-Pipeline Reference Split')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[0, 1]
+    if not control_summary.empty:
+        ranked = control_summary.sort_values('mean_sharpe', ascending=True)
+        labels = [_display_label(label).replace('\n', ' ') for label in ranked['component_label']]
+        colors = [_control_color(label) for label in ranked['component_label']]
+        ax.barh(labels, ranked['mean_sharpe'], color=colors, alpha=0.9)
+        for y, val in enumerate(ranked['mean_sharpe']):
+            ax.text(val + 0.01, y, f'{val:.2f}', va='center', fontsize=8)
+    ax.set_title('Control Comparison: Mean Sharpe')
+    ax.set_xlabel('Mean Sharpe')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[0, 2]
+    if not control_summary.empty:
+        for _, row in control_summary.iterrows():
+            label = str(row['component_label'])
+            x = float(row['mean_vol'])
+            y = float(row['mean_return'])
+            ax.scatter(
+                x, y, s=95, color=_control_color(label),
+                edgecolors='black', linewidth=0.6, alpha=0.9, zorder=4,
+            )
+            ax.annotate(_display_label(label).replace('\n', ' '), (x, y), fontsize=7, xytext=(5, 4), textcoords='offset points')
+    ax.set_title('Control Comparison: Return vs Volatility')
+    ax.set_xlabel('Mean annualized volatility')
+    ax.set_ylabel('Mean annualized return')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1, 0]
+    if not ablation_summary.empty:
+        labels = [_display_label(label).replace('\n', ' ') for label in ablation_summary['component_label']]
+        colors = ['#bbbbbb', '#9ecae1', '#6baed6', '#3182bd', '#08519c', '#08306b']
+        ax.barh(labels, ablation_summary['mean_sharpe'], color=colors[:len(labels)], alpha=0.9)
+        for y, val in enumerate(ablation_summary['mean_sharpe']):
+            ax.text(val + 0.01, y, f'{val:.2f}', va='center', fontsize=8)
+    ax.set_title('Legacy Ablation: Mean Sharpe by Stack')
+    ax.set_xlabel('Mean Sharpe')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1, 1]
+    rolling = metrics[metrics['suite'] == 'rolling_window']
+    if not rolling.empty:
+        ax.plot(rolling['window_id'], rolling['sharpe'], marker='o', color='#1f77b4', linewidth=2, label='Full Pipeline')
+    if rolling_references is not None and not rolling_references.empty:
+        ref_styles = [
+            ('factor_benchmark', '#ff7f0e', '-'),
+            ('vol_target', '#2ca02c', '-.'),
+            ('dd_delever', '#9467bd', ':'),
+            ('SPY', 'black', '--'),
+        ]
+        for label, color, linestyle in ref_styles:
+            group = rolling_references[rolling_references['label'] == label]
+            if not group.empty:
+                ax.plot(group['window_id'], group['sharpe'], marker='o', color=color, linestyle=linestyle, label=_display_label(label))
+        ax.legend(fontsize=7, ncol=2)
+    ax.set_title('Robustness: Rolling-Window Sharpe')
+    ax.set_xlabel('Window')
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1, 2]
+    if not control_summary.empty:
+        ranked = control_summary.copy()
+        ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
+        for _, row in ranked.iterrows():
+            label = str(row['component_label'])
+            x = float(row['drawdown_abs'])
+            y = float(row['mean_return'])
+            ax.scatter(
+                x, y, s=95, color=_control_color(label),
+                edgecolors='black', linewidth=0.6, alpha=0.9, zorder=4,
+            )
+            ax.annotate(_display_label(label).replace('\n', ' '), (x, y), fontsize=7, xytext=(5, 4), textcoords='offset points')
+        frontier = _pareto_frontier_points(ranked)
+        if not frontier.empty and len(frontier) >= 2:
+            ax.plot(frontier['drawdown_abs'], frontier['mean_return'], color='black', linewidth=1.4, linestyle='--', alpha=0.8, label='Pareto frontier')
+            ax.legend(fontsize=7, loc='lower right')
+    ax.set_title('Control Comparison: Return vs Drawdown')
+    ax.set_xlabel('Absolute mean max drawdown')
+    ax.set_ylabel('Mean annualized return')
+    ax.grid(True, alpha=0.3)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    if not control_summary.empty:
+        frontier_output_path.parent.mkdir(parents=True, exist_ok=True)
+        frontier_fig, frontier_ax = plt.subplots(figsize=(8.5, 6.0))
+        ranked = control_summary.copy()
+        ranked['drawdown_abs'] = ranked['mean_max_drawdown'].abs()
+        for _, row in ranked.iterrows():
+            label = str(row['component_label'])
+            x = float(row['drawdown_abs'])
+            y = float(row['mean_return'])
+            frontier_ax.scatter(x, y, s=110, color=_control_color(label), edgecolors='black', linewidth=0.6, alpha=0.9)
+            frontier_ax.annotate(_display_label(label).replace('\n', ' '), (x, y), fontsize=8, xytext=(5, 4), textcoords='offset points')
+        frontier = _pareto_frontier_points(ranked)
+        if not frontier.empty:
+            frontier_ax.plot(frontier['drawdown_abs'], frontier['mean_return'], color='black', linewidth=1.5, linestyle='--')
+        frontier_ax.set_title('Control-Method Pareto Frontier')
+        frontier_ax.set_xlabel('Absolute mean max drawdown')
+        frontier_ax.set_ylabel('Mean annualized return')
+        frontier_ax.grid(True, alpha=0.3)
+        frontier_fig.tight_layout()
+        frontier_fig.savefig(frontier_output_path, dpi=150, bbox_inches='tight')
+        plt.close(frontier_fig)

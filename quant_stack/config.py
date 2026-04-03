@@ -3,6 +3,48 @@
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Iterable
+
+
+def _validate_non_negative(name: str, value: float) -> None:
+    if float(value) < 0.0:
+        raise ValueError(f"{name} must be non-negative, got {value!r}")
+
+
+def _validate_positive(name: str, value: float) -> None:
+    if float(value) <= 0.0:
+        raise ValueError(f"{name} must be positive, got {value!r}")
+
+
+def _validate_int_min(name: str, value: int, minimum: int) -> None:
+    if int(value) < int(minimum):
+        raise ValueError(f"{name} must be >= {minimum}, got {value!r}")
+
+
+def _validate_unit_interval(name: str, value: float) -> None:
+    if not 0.0 <= float(value) <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1], got {value!r}")
+
+
+def _validate_half_open_unit_interval(name: str, value: float) -> None:
+    if not 0.0 <= float(value) < 1.0:
+        raise ValueError(f"{name} must lie in [0, 1), got {value!r}")
+
+
+def _validate_choice(name: str, value: str, allowed: Iterable[str]) -> None:
+    allowed_tuple = tuple(str(item) for item in allowed)
+    if str(value) not in allowed_tuple:
+        raise ValueError(f"{name} must be one of {allowed_tuple}, got {value!r}")
+
+
+def _validate_range_tuple(name: str, bounds: tuple[float, float], *, lower_bound: float | None = None) -> None:
+    if len(bounds) != 2:
+        raise ValueError(f"{name} must be a length-2 tuple, got {bounds!r}")
+    low, high = map(float, bounds)
+    if lower_bound is not None and low < lower_bound:
+        raise ValueError(f"{name} lower bound must be >= {lower_bound}, got {bounds!r}")
+    if high < low:
+        raise ValueError(f"{name} upper bound must be >= lower bound, got {bounds!r}")
 
 # ============================================================
 # Universe Definitions
@@ -236,6 +278,11 @@ class FeatureAvailabilityConfig:
     allow_static_sec_quality: bool = True
     sec_quality_note: str = 'Static SEC snapshot used as research prior, not point-in-time safe.'
 
+    def __post_init__(self) -> None:
+        _validate_int_min('macro_lag_days', self.macro_lag_days, 0)
+        if not str(self.sec_quality_note).strip():
+            raise ValueError("sec_quality_note must be non-empty")
+
 
 @dataclass
 class CostModelConfig:
@@ -257,6 +304,17 @@ class CostModelConfig:
     adv_participation_cap: float = 0.05
     adv_penalty_bps: float = 10.0
     execution_delay_days: int = 0
+
+    def __post_init__(self) -> None:
+        for name in (
+            'base_cost_bps', 'turnover_vol_multiplier', 'size_penalty_bps',
+            'ac_permanent_beta', 'ac_temporary_eta', 'cost_stress_multiplier',
+            'adv_penalty_bps',
+        ):
+            _validate_non_negative(name, getattr(self, name))
+        _validate_int_min('adv_lookback_days', self.adv_lookback_days, 1)
+        _validate_unit_interval('adv_participation_cap', self.adv_participation_cap)
+        _validate_int_min('execution_delay_days', self.execution_delay_days, 0)
 
 
 @dataclass
@@ -288,6 +346,29 @@ class OptimizerConfig:
         }
     )
 
+    def __post_init__(self) -> None:
+        _validate_unit_interval('max_weight', self.max_weight)
+        if self.max_weight == 0.0:
+            raise ValueError("max_weight must be > 0")
+        for name in ('risk_aversion', 'alpha_strength', 'anchor_strength', 'turnover_penalty'):
+            _validate_non_negative(name, getattr(self, name))
+        _validate_unit_interval('adaptive_allocator_min_invested', self.adaptive_allocator_min_invested)
+        _validate_half_open_unit_interval('adaptive_allocator_param_smoothing', self.adaptive_allocator_param_smoothing)
+        for name in (
+            'adaptive_allocator_risk_mult_range',
+            'adaptive_allocator_anchor_mult_range',
+            'adaptive_allocator_turnover_mult_range',
+            'adaptive_allocator_alpha_mult_range',
+            'adaptive_allocator_cap_scale_range',
+            'adaptive_allocator_group_cap_scale_range',
+        ):
+            _validate_range_tuple(name, getattr(self, name), lower_bound=0.0)
+        _validate_int_min('adaptive_allocator_policy_version', self.adaptive_allocator_policy_version, 1)
+        for group, cap in self.group_caps.items():
+            _validate_unit_interval(f'group_caps[{group}]', cap)
+            if float(cap) == 0.0:
+                raise ValueError(f"group_caps[{group}] must be > 0")
+
 
 @dataclass
 class AlphaFeedbackConfig:
@@ -301,6 +382,15 @@ class AlphaFeedbackConfig:
     action_regime_feedback_strength: float = 0.12
     shrink_in_stress_strength: float = 0.08
     policy_version: int = 2
+
+    def __post_init__(self) -> None:
+        for name in (
+            'exposure_reweight_strength', 'cash_garch_boost', 'cash_hmm_boost',
+            'crowded_name_penalty_strength', 'action_regime_feedback_strength',
+            'shrink_in_stress_strength',
+        ):
+            _validate_non_negative(name, getattr(self, name))
+        _validate_int_min('policy_version', self.policy_version, 1)
 
 
 @dataclass
@@ -317,6 +407,13 @@ class OptionOverlayConfig:
     theta_premium_scale: float = 0.55
     convexity_scale: float = 1.15
     collar_financing_ratio: float = 0.65
+
+    def __post_init__(self) -> None:
+        _validate_int_min('target_dte_days', self.target_dte_days, 1)
+        for name in ('put_strike_otm', 'call_strike_otm', 'spread_width', 'max_effective_hedge', 'collar_financing_ratio'):
+            _validate_unit_interval(name, getattr(self, name))
+        for name in ('theta_premium_scale', 'convexity_scale'):
+            _validate_non_negative(name, getattr(self, name))
 
 
 # ============================================================
@@ -342,6 +439,7 @@ CONTROL_METHODS = (
     'q_learning',            # RL: Tabular Q-learning (portfolio only)
     'ppo',                   # RL: End-to-end PPO
 )
+SUPPORTED_CONTROL_METHODS = CONTROL_METHODS + ('adaptive_allocator',)
 
 
 @dataclass
@@ -448,6 +546,88 @@ class ControlConfig:
     ql_gamma: float = 0.95
     ql_epsilon: float = 0.15
 
+    def __post_init__(self) -> None:
+        _validate_choice('method', self.method, SUPPORTED_CONTROL_METHODS)
+        _validate_non_negative('fixed_invested_fraction', self.fixed_invested_fraction)
+        _validate_positive('vol_target_annual', self.vol_target_annual)
+        _validate_int_min('vol_lookback', self.vol_lookback, 2)
+        _validate_non_negative('dd_min_invested', self.dd_min_invested)
+        _validate_choice('ensemble_mode', self.ensemble_mode, ('mean', 'min'))
+        _validate_int_min('bandit_n_actions', self.bandit_n_actions, 2)
+        _validate_int_min('bandit_reward_window', self.bandit_reward_window, 1)
+        _validate_positive('bandit_alpha_ucb', self.bandit_alpha_ucb)
+        _validate_unit_interval('bandit_epsilon', self.bandit_epsilon)
+        _validate_int_min('bandit_feature_lookback', self.bandit_feature_lookback, 1)
+        _validate_choice('supervised_model', self.supervised_model, ('logistic', 'random_forest', 'decision_tree'))
+        _validate_int_min('supervised_retrain_every', self.supervised_retrain_every, 1)
+        _validate_int_min('supervised_label_window', self.supervised_label_window, 1)
+        _validate_unit_interval('cvar_confidence', self.cvar_confidence)
+        if self.cvar_confidence == 1.0:
+            raise ValueError("cvar_confidence must be < 1")
+        _validate_int_min('cvar_n_scenarios', self.cvar_n_scenarios, 1)
+        _validate_non_negative('cvar_lambda_base', self.cvar_lambda_base)
+        if not self.council_experts:
+            raise ValueError("council_experts must be non-empty")
+        if not self.mlp_meta_experts:
+            raise ValueError("mlp_meta_experts must be non-empty")
+        for expert in self.council_experts:
+            _validate_choice('council_experts', expert, ('regime_rules', 'linucb', 'cvar_robust'))
+        for expert in self.mlp_meta_experts:
+            _validate_choice('mlp_meta_experts', expert, ('regime_rules', 'linucb', 'cvar_robust'))
+        _validate_choice('council_gate_model', self.council_gate_model, ('logistic',))
+        _validate_int_min('council_retrain_every', self.council_retrain_every, 1)
+        _validate_int_min('council_min_samples', self.council_min_samples, 1)
+        _validate_positive('council_temperature', self.council_temperature)
+        _validate_unit_interval('council_min_weight', self.council_min_weight)
+        if len(self.council_default_bias) != len(self.council_experts):
+            raise ValueError("council_default_bias must match council_experts length")
+        _validate_int_min('mpc_horizon', self.mpc_horizon, 1)
+        _validate_int_min('mpc_replan_every', self.mpc_replan_every, 1)
+        _validate_unit_interval('mpc_discount', self.mpc_discount)
+        _validate_unit_interval('mpc_alpha_decay', self.mpc_alpha_decay)
+        _validate_unit_interval('mpc_stress_reversion', self.mpc_stress_reversion)
+        _validate_unit_interval('mpc_min_invested', self.mpc_min_invested)
+        _validate_unit_interval('mpc_max_stabilizer', self.mpc_max_stabilizer)
+        for name in ('mpc_risk_penalty', 'mpc_turnover_penalty', 'mpc_drawdown_penalty', 'mpc_stress_penalty', 'mpc_terminal_penalty'):
+            _validate_non_negative(name, getattr(self, name))
+        _validate_unit_interval('mpc_max_daily_change', self.mpc_max_daily_change)
+        _validate_int_min('mpc_objective_version', self.mpc_objective_version, 1)
+        _validate_unit_interval('adaptive_allocator_min_invested', self.adaptive_allocator_min_invested)
+        _validate_half_open_unit_interval('adaptive_allocator_param_smoothing', self.adaptive_allocator_param_smoothing)
+        for name in (
+            'adaptive_allocator_risk_mult_range',
+            'adaptive_allocator_anchor_mult_range',
+            'adaptive_allocator_turnover_mult_range',
+            'adaptive_allocator_alpha_mult_range',
+            'adaptive_allocator_cap_scale_range',
+            'adaptive_allocator_group_cap_scale_range',
+        ):
+            _validate_range_tuple(name, getattr(self, name), lower_bound=0.0)
+        _validate_int_min('adaptive_allocator_policy_version', self.adaptive_allocator_policy_version, 1)
+        _validate_choice('cmdp_constraint_type', self.cmdp_constraint_type, ('drawdown', 'tail_loss'))
+        _validate_non_negative('cmdp_constraint_kappa', self.cmdp_constraint_kappa)
+        _validate_non_negative('cmdp_lambda_init', self.cmdp_lambda_init)
+        _validate_non_negative('cmdp_lambda_lr', self.cmdp_lambda_lr)
+        _validate_non_negative('cmdp_tail_loss_threshold', self.cmdp_tail_loss_threshold)
+        if len(self.convexity_mode_carries) != 3 or len(self.convexity_mode_lambdas) != 3:
+            raise ValueError("convexity_mode_carries and convexity_mode_lambdas must both have length 3")
+        for idx, value in enumerate(self.convexity_mode_carries):
+            _validate_non_negative(f'convexity_mode_carries[{idx}]', value)
+        for idx, value in enumerate(self.convexity_mode_lambdas):
+            _validate_non_negative(f'convexity_mode_lambdas[{idx}]', value)
+        _validate_int_min('mlp_meta_retrain_every', self.mlp_meta_retrain_every, 1)
+        _validate_int_min('mlp_meta_min_samples', self.mlp_meta_min_samples, 1)
+        _validate_int_min('mlp_meta_feature_lookback', self.mlp_meta_feature_lookback, 1)
+        _validate_unit_interval('mlp_meta_min_weight', self.mlp_meta_min_weight)
+        if len(self.mlp_meta_default_bias) != len(self.mlp_meta_experts):
+            raise ValueError("mlp_meta_default_bias must match mlp_meta_experts length")
+        _validate_positive('mlp_meta_learning_rate', self.mlp_meta_learning_rate)
+        _validate_non_negative('mlp_meta_alpha_reg', self.mlp_meta_alpha_reg)
+        _validate_positive('mlp_meta_temperature', self.mlp_meta_temperature)
+        _validate_positive('ql_alpha', self.ql_alpha)
+        _validate_unit_interval('ql_gamma', self.ql_gamma)
+        _validate_unit_interval('ql_epsilon', self.ql_epsilon)
+
 
 @dataclass
 class ExperimentConfig:
@@ -466,6 +646,11 @@ class ExperimentConfig:
     use_vol_state: bool = False
     # Control method (new architecture v2)
     control_method: str = 'none'
+
+    def __post_init__(self) -> None:
+        if not str(self.label).strip():
+            raise ValueError("experiment label must be non-empty")
+        _validate_choice('control_method', self.control_method, SUPPORTED_CONTROL_METHODS)
 
 
 @dataclass
@@ -489,6 +674,17 @@ class PipelineConfig:
     option_overlay: OptionOverlayConfig = field(default_factory=OptionOverlayConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
+
+    def __post_init__(self) -> None:
+        if not 0.0 < float(self.train_frac) < 1.0:
+            raise ValueError(f"train_frac must lie in (0, 1), got {self.train_frac!r}")
+        _validate_unit_interval('rebalance_band', self.rebalance_band)
+        _validate_unit_interval('min_turnover', self.min_turnover)
+        for idx, value in enumerate(self.hedge_ratios):
+            _validate_unit_interval(f'hedge_ratios[{idx}]', value)
+        _validate_choice('portfolio_reward_mode', self.portfolio_reward_mode, ('differential_sharpe', 'return', 'sortino', 'mean_variance', 'asymmetric_return'))
+        _validate_choice('hedge_reward_mode', self.hedge_reward_mode, ('differential_sharpe', 'return', 'sortino', 'mean_variance', 'asymmetric_return'))
+        _validate_choice('e2e_reward_mode', self.e2e_reward_mode, ('differential_sharpe', 'return', 'sortino', 'mean_variance'))
 
 
 @dataclass
@@ -524,6 +720,50 @@ class EvaluationConfig:
     # Time-series cross-validation
     ts_cv_folds: int = 5
     enable_ts_cv: bool = True
+
+    def __post_init__(self) -> None:
+        if not str(self.output_dir).strip():
+            raise ValueError("output_dir must be non-empty")
+        if not self.train_fracs:
+            raise ValueError("train_fracs must be non-empty")
+        for idx, value in enumerate(self.train_fracs):
+            if not 0.0 < float(value) < 1.0:
+                raise ValueError(f"train_fracs[{idx}] must lie in (0, 1), got {value!r}")
+        if not 0.0 < float(self.rolling_train_frac) < 1.0:
+            raise ValueError(f"rolling_train_frac must lie in (0, 1), got {self.rolling_train_frac!r}")
+        _validate_int_min('rolling_window_days', self.rolling_window_days, 2)
+        _validate_int_min('rolling_step_days', self.rolling_step_days, 1)
+        _validate_int_min('min_rolling_windows', self.min_rolling_windows, 1)
+        _validate_int_min('max_rolling_windows', self.max_rolling_windows, self.min_rolling_windows)
+        for name in ('cost_bps_grid', 'cost_stress_multiplier_grid', 'rebalance_band_grid', 'hedge_scale_grid', 'adv_participation_cap_grid', 'execution_delay_grid', 'macro_lag_grid', 'reward_mode_grid'):
+            values = getattr(self, name)
+            if not values:
+                raise ValueError(f"{name} must be non-empty")
+        for idx, value in enumerate(self.cost_bps_grid):
+            _validate_non_negative(f'cost_bps_grid[{idx}]', value)
+        for idx, value in enumerate(self.cost_stress_multiplier_grid):
+            _validate_non_negative(f'cost_stress_multiplier_grid[{idx}]', value)
+        for idx, value in enumerate(self.rebalance_band_grid):
+            _validate_unit_interval(f'rebalance_band_grid[{idx}]', value)
+        for idx, value in enumerate(self.hedge_scale_grid):
+            _validate_non_negative(f'hedge_scale_grid[{idx}]', value)
+        for idx, value in enumerate(self.adv_participation_cap_grid):
+            _validate_unit_interval(f'adv_participation_cap_grid[{idx}]', value)
+        for idx, value in enumerate(self.execution_delay_grid):
+            _validate_int_min(f'execution_delay_grid[{idx}]', value, 0)
+        for idx, value in enumerate(self.macro_lag_grid):
+            _validate_int_min(f'macro_lag_grid[{idx}]', value, 0)
+        for idx, value in enumerate(self.reward_mode_grid):
+            _validate_choice(f'reward_mode_grid[{idx}]', value, ('differential_sharpe', 'return', 'sortino', 'mean_variance'))
+        _validate_choice('research_e2e_scope', self.research_e2e_scope, ('baseline_only', 'all', 'disabled'))
+        _validate_choice('checkpoint_match_mode', self.checkpoint_match_mode, ('strict', 'compatible', 'config_only'))
+        _validate_int_min('bootstrap_samples', self.bootstrap_samples, 1)
+        _validate_int_min('bootstrap_block_size', self.bootstrap_block_size, 1)
+        _validate_int_min('ts_cv_folds', self.ts_cv_folds, 2)
+        if not self.meta_learning_universes:
+            raise ValueError("meta_learning_universes must be non-empty")
+        for idx, value in enumerate(self.meta_learning_universes):
+            _validate_choice(f'meta_learning_universes[{idx}]', value, ('A', 'B'))
 
 
 @dataclass
