@@ -23,8 +23,11 @@ from quant_stack.data import (
     compute_macro_regime_signal,
 )
 from quant_stack.evaluation import build_ablation_suite, build_control_comparison_suite, run_research_evaluation
-from quant_stack.execution import _compute_transaction_cost
 from quant_stack.pipeline import _apply_macro_lag
+try:
+    from quant_stack.execution import _compute_transaction_cost
+except ModuleNotFoundError:
+    from quant_stack.pipeline import _compute_transaction_cost
 from quant_stack.config import ControlConfig, EvaluationConfig, PipelineConfig
 from quant_stack.controllers import build_controller, ControlState
 from quant_stack.rl import PortfolioConstructionRL
