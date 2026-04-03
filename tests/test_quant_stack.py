@@ -23,7 +23,8 @@ from quant_stack.data import (
     compute_macro_regime_signal,
 )
 from quant_stack.evaluation import build_ablation_suite, build_control_comparison_suite, run_research_evaluation
-from quant_stack.pipeline import _apply_macro_lag, _compute_transaction_cost
+from quant_stack.execution import _compute_transaction_cost
+from quant_stack.pipeline import _apply_macro_lag
 from quant_stack.config import ControlConfig, EvaluationConfig, PipelineConfig
 from quant_stack.controllers import build_controller, ControlState
 from quant_stack.rl import PortfolioConstructionRL
@@ -182,11 +183,28 @@ class EvaluationTests(unittest.TestCase):
         configs = build_control_comparison_suite(PipelineConfig())
         labels = [config.experiment.label for config in configs]
 
-        expected_prefixes = [
-            'factor_only', 'A1_', 'A2_', 'A3_', 'A4_', 'A5_', 'A5_',
-            'B1_', 'B2_', 'B3_', 'C_', 'D_', 'RL_',
+        expected_labels = [
+            'factor_only',
+            'A1_fixed',
+            'A2_vol_target',
+            'A3_dd_delever',
+            'A4_regime_rules',
+            'A5_ensemble_mean',
+            'B1_linucb',
+            'B2_thompson',
+            'B3_epsilon_greedy',
+            'C_supervised',
+            'D_cvar_robust',
+            'D_plus_convexity',
+            'H_mpc',
+            'E_council',
+            'E_plus_convexity',
+            'G_mlp_meta',
+            'G_plus_convexity',
+            'F_cmdp_lagrangian',
+            'RL_q_learning',
         ]
-        self.assertEqual(len(configs), len(expected_prefixes))
+        self.assertEqual(labels, expected_labels)
         self.assertEqual(len(labels), len(set(labels)))
 
     def test_controllers_return_valid_invested_fraction(self) -> None:
@@ -341,7 +359,7 @@ class EvaluationTests(unittest.TestCase):
 
             self.assertEqual(call_count, 0)
             self.assertGreater(first_call_count, 0)
-            progress_path = Path(tmpdir) / "research_progress.json"
+            progress_path = Path(tmpdir) / "universe_A" / "research_progress.json"
             self.assertTrue(progress_path.exists())
             progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
             self.assertEqual(progress_payload["status"], "completed")
