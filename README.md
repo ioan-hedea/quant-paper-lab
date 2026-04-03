@@ -20,6 +20,12 @@ pip install -e .[dev]
 pip install -e .[e2e]
 ```
 
+Direct install from GitHub also works:
+
+```bash
+pip install "quant_paper_lab @ git+https://github.com/ioan-hedea/quant-paper-lab.git"
+```
+
 Installed console commands:
 
 - `quant-pipeline`: run the main pipeline entrypoint
