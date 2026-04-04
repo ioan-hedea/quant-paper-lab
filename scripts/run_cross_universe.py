@@ -6,12 +6,14 @@ Usage::
     python scripts/run_cross_universe.py --universe B   # single universe
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 import sys
 import warnings
 
-# Allow running from repo root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from quant_stack.config import EvaluationConfig, PipelineConfig
 from quant_stack.evaluation import run_cross_universe_evaluation

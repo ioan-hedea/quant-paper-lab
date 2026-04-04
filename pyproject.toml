@@ -12,6 +12,16 @@ license = { text = "MIT" }
 authors = [
   { name = "Ioan Hedea" }
 ]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Office/Business :: Financial :: Investment",
+]
 keywords = [
   "portfolio-management",
   "systematic-trading",
@@ -38,6 +48,11 @@ dev = [
   "flake8>=7,<8",
   "pytest>=8,<9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ioan-hedea/quant-paper-lab"
+Repository = "https://github.com/ioan-hedea/quant-paper-lab"
+Issues = "https://github.com/ioan-hedea/quant-paper-lab/issues"
 
 [project.scripts]
 quant-pipeline = "quant_stack.cli:pipeline_main"
