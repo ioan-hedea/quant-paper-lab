@@ -41,35 +41,21 @@
 \twocolumn[
 \maketitle
 \begin{abstract}
-Portfolio management systems often separate alpha generation from risk control,
-but the question of which control mechanism works best remains underexplored.
-This paper systematically compares 19 control approaches over a finance-first
-alpha engine built from factor, GARCH, and HMM sleeves, using frozen-bundle
-evaluation across two disjoint universes of 77 and 75 traded tickers and 13
-years of daily data from April 2013 through March 2026. The compared methods
-include no control beyond the alpha engine, simple rules, contextual bandits,
-supervised control, CVaR-aware robust optimization, convexity-aware protection
-modes, a learned council meta-controller, an MLP-gated meta-controller, a
-CMDP-Lagrangian controller, a predictive-control MPC controller, and
-Q-learning RL. Results show that the robust family dominates both universes,
-but the best robust variant is environment-dependent. In Universe A, the
-strongest overall point estimate is \texttt{D\_plus\_convexity}, with mean
-Sharpe 0.84 and Calmar 0.95 versus 0.81 and 0.69 for plain
-CVaR-robust. In Universe B, plain \texttt{D\_cvar\_robust} is strongest at
-0.70 mean Sharpe, while \texttt{E\_council} and \texttt{H\_mpc} both cluster
-near 0.65 with materially shallower drawdowns. The best single run,
-\texttt{D\_plus\_convexity\_tf0.50} in Universe A, reaches 21.4\% annualized
-return with 1.00 Sharpe. Reference-split block-bootstrap tests show that
-Universe-A \texttt{D\_plus\_convexity} improves on LinUCB, the council, the
-MLP gate, and MPC on Sharpe, while its edge over plain CVaR-robust is not
-decisive; in Universe B, plain CVaR-robust remains the point-estimate leader
-but is not cleanly separated from \texttt{D\_plus\_convexity},
-\texttt{E\_council}, or \texttt{H\_mpc}. The paper's contribution is
-therefore a risk-shaping framework for portfolio control rather than benchmark
-rhetoric: downside-aware outcome selection dominates the learned alternatives
-across both universes, convex payoff transformation is highly valuable when
-tail asymmetry is strong, and learning is most useful as meta-control rather
-than as the primary decision layer.
+Which controller adds the most value once a finance-first alpha engine is
+already in place? This paper studies that question through a risk-shaping
+operator framework that classifies portfolio controllers by how they alter the
+induced return distribution, either through tail-aware outcome selection,
+payoff transformation, or mixtures of policies. The empirical setting is a
+modular factor/GARCH/HMM alpha engine with an explicit constrained allocator
+and a frozen-bundle evaluation comparing 19 controllers across two disjoint
+equity universes. Across both universes, the robust family defines the
+frontier. Convexity-enhanced CVaR is strongest when left-tail asymmetry is
+pronounced, while plain CVaR is the more portable robust baseline. Learning
+helps materially when used as meta-control over structured experts, but not as
+the primary control layer. The contribution is therefore a reproducible
+framework for comparing portfolio controllers under shared alpha, timing, and
+cost assumptions, together with evidence that explicit risk shaping dominates
+the learned alternatives tested here.
 \end{abstract}
 
 \medskip
@@ -78,44 +64,20 @@ than as the primary decision layer.
 
 \section{Introduction}
 
-Many quantitative trading systems are modular long before they are learned.
-Cross-sectional factors, volatility estimates, regime filters, and constrained
-allocators already encode a large amount of domain structure before any control
-policy is added. The practical question, then, is not only how to forecast
-returns, but how much control complexity is justified once a finance-first
-alpha engine is already working. Fixed allocation, simple rules, contextual
-bandits, supervised controllers, robust optimization, and RL are all plausible
-answers to that question.
+\subsection{Motivation}
 
-The present manuscript reflects a deliberate architecture revision. Earlier
-project versions were framed around whether RL worked as a controller. The
-March 29, 2026 frozen-bundle evaluation broadened that question into a direct
-comparison of control mechanisms. The resulting architecture keeps the proven
-alpha core, factor anchoring, and constrained allocator, but evaluates a wider
-set of downstream controllers under one shared data, timing, and cost protocol.
-
-The revised implementation contributes five practical elements to the evaluation
-setup.
-\begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
-\item A modular code architecture that cleanly separates data, alpha, control,
-      backtesting, and visualization concerns.
-\item A factor-anchored alpha layer limited to components that survived pruning:
-      cross-sectional factors, GARCH volatility forecasts, and a two-state HMM
-      regime sleeve.
-\item A constrained optimization layer between alpha and control that turns
-      signals into a capped, turnover-aware, and group-aware target book.
-\item A control-method comparison spanning fixed exposure, simple rules,
-      contextual bandits, supervised control, robust optimization,
-      convexity-aware protection, council-style meta-control, MLP-gated
-      meta-control, CMDP-style constrained learning, and RL comparators.
-\item A frozen-bundle research workflow including ablations, rolling windows,
-      significance tests, reward sweeps, and regime-conditioned diagnostics.
-\end{enumerate}
+Many quantitative portfolio systems are modular long before they are learned.
+Cross-sectional factors, volatility forecasts, regime filters, and constrained
+allocators already encode substantial financial structure before any control
+policy is added. The practical question is therefore not only how to forecast
+returns, but which controller class adds the most value once a finance-first
+alpha engine is already in place. Fixed exposure, simple rules, contextual
+bandits, supervised controllers, robust optimization, meta-control, predictive
+control, and RL are all plausible answers to that question.
 
 \subsection{Research Questions}
 
-The current version of the report is organized around three revised research
-questions.
+The paper studies three questions.
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \textbf{RQ1: Control-method comparison.} Given a strong finance-first
       alpha engine, which controller adds the most value?
@@ -125,19 +87,44 @@ questions.
       outperform optimization-based control on top of the same alpha engine?
 \end{enumerate}
 
-From a research perspective, this framing matters because it narrows the gap
-between a teaching prototype and a system that can be discussed in the language
-of quantitative portfolio construction. The objective is not to claim that the
-pipeline is production-ready. Rather, it is to assemble a well-motivated stack
-in which each modeling choice has a clear financial role and where performance
-can be decomposed into alpha generation, portfolio construction, and control.
+\subsection{Contributions}
 
-The central defended statement is therefore not that one more controller happened to win. The paper's main contribution is a risk-shaping framework for portfolio control under shared alpha, timing, and cost assumptions. Within that framework, the finished frozen-bundle shows that the winning design combines two distinct operations: tail-aware selection of portfolio outcomes through CVaR and tail-aware transformation of realized payoffs through convex protection. The learning results then sharpen the boundary of the design space rather than overturn it: learning helps most as meta-control over already-credible structured experts, not as the primary decision layer.
+The paper makes three contributions.
+\begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
+\item A risk-shaping operator framework that classifies controllers by how they
+      reshape the induced return distribution through selection operators,
+      outcome operators, or mixtures of policies.
+\item A modular pipeline that combines a finance-first alpha engine with an
+      explicit constrained allocator, separating alpha generation, portfolio
+      construction, and control.
+\item A frozen-bundle evaluation comparing 19 controller candidates across two
+      disjoint universes, with shared timing and cost assumptions, robustness
+      slices, and block-bootstrap significance tests.
+\end{enumerate}
 
-\section{Related Literature and Design Motivation}
+The central claim is therefore not merely that one controller wins a
+leaderboard. It is that portfolio control can be analyzed as risk shaping under
+shared alpha, timing, and cost assumptions. Within that lens, the dominant
+design combines tail-aware selection through CVaR with payoff transformation
+through convex protection, while learning contributes most as meta-control
+rather than as the primary decision layer.
 
-The report is not meant to claim novelty in any individual modeling choice.
-Instead, it builds a coherent pipeline from well-established ingredients.
+\paragraph{Paper roadmap.}
+Section~2 positions the paper against the main portfolio-management traditions
+so the comparison target is clear. Sections~3 and~4 then define the architecture
+and data contract, making explicit which layers are fixed and which are
+compared. Section~5 introduces the control families and the risk-shaping
+operator lens that unifies them. Sections~6 and~7 specify the frozen-bundle
+evaluation protocol and reporting metrics. Section~8 answers the three research
+questions empirically, and Section~9 explains the mechanism behind the winning
+designs and the limits of learning-based control in this setting.
+
+\section{Related Work}
+
+Table~\ref{tab:taxonomy} positions the paper relative to the main architecture
+families in portfolio management. The building blocks themselves are
+well-established; the novelty lies in using them inside a disciplined
+control-comparison design.
 
 \textbf{Factor investing.} The cross-sectional component is aligned with the idea
 that common risk factors help explain returns \cite{fama1993}. Momentum is
@@ -149,12 +136,11 @@ stabilize the cross-section.
 GARCH sleeve \cite{engle1982,bollerslev1986}, while the market-regime component
 uses a two-state hidden Markov model in the spirit of Hamilton \cite{hamilton1989}.
 
-\textbf{Rule-based, bandit, and optimization-based control.} A key part of the
-revised paper is that RL is no longer the only sophisticated controller under
-study. Volatility targeting, drawdown-based deleveraging, regime rules,
-contextual bandits, supervised controllers, and CVaR-aware robust allocation
-are all treated as serious alternatives because these are the kinds of methods
-one would compare before concluding that sequential RL is necessary.
+\textbf{Rule-based, bandit, and optimization-based control.} Volatility
+targeting, drawdown-based deleveraging, regime rules, contextual bandits,
+supervised controllers, and CVaR-aware robust allocation are all treated as
+serious alternatives because these are the methods a practitioner would compare
+before concluding that sequential learning is necessary.
 
 \textbf{Reinforcement learning.} RL is used as a controller rather than a raw
 alpha generator. This follows the practical observation that in finance, RL is
@@ -199,12 +185,9 @@ has emphasized that RL in finance still suffers from weak evaluation discipline,
 narrow datasets, and inconsistent reporting \cite{sun2023,jander2025}. That
 critique directly motivates the frozen-bundle methodology used here.
 
-Table~\ref{tab:taxonomy} positions the present approach relative to these
-broader families. The contribution is not a new RL algorithm. It is a
-methodological proposal: if strong finance-first alpha already exists, the main
-research question should be a disciplined comparison of control mechanisms, with
-RL judged against simple rules and end-to-end learned alternatives rather than
-against passive exposure alone.
+Table~\ref{tab:taxonomy} summarizes the paper's position: the contribution is
+not a new factor model or RL algorithm, but a disciplined comparison of control
+mechanisms on top of a finance-first alpha engine.
 
 \begin{table*}[t]
 \centering
@@ -227,21 +210,6 @@ Neural forecasting + optimizer & Neural or ML return forecasts & Separate optimi
 \bottomrule
 \end{tabular}
 \end{table*}
-
-\subsection{Contribution Type}
-
-The contribution is not novelty in any single alpha ingredient. The paper does
-not claim a new factor model, a new GARCH variant, or a new RL algorithm. Its
-contribution lies instead in three places. First, it proposes a clear role
-assignment between alpha and control: financially grounded models produce the
-alpha book, while controllers decide how aggressively to express it. Second, it
-implements that role assignment in a modular architecture with an explicit
-constrained allocator between alpha and control. Third, it pairs the
-architecture with a frozen-bundle evaluation workflow designed to test that
-claim via ablations, timing-discipline checks, robustness slices, significance
-tests, and regime-conditioned behavior summaries. The contribution is therefore
-chiefly methodological: the paper proposes and tests a disciplined way to
-evaluate portfolio control mechanisms on top of a finance-first alpha engine.
 
 \section{System Architecture}
 
@@ -303,8 +271,10 @@ records realized outcomes.
 The alpha layer is intentionally finance-first, the allocator builds a capped
 and turnover-aware target book, and the control comparison focuses on how much
 of that book to express rather than on a second stock-selection problem. The
-compared control families span simple rules, contextual bandits, supervised
-control, robust optimization, and RL.}
+fixed components are the data, alpha, and allocator stack; the compared
+components are the control families that reshape how the target book is
+expressed. Those compared families span simple rules, contextual bandits,
+supervised control, robust optimization, predictive control, and RL.}
 \label{fig:architecture}
 \end{figure*}
 
@@ -372,8 +342,7 @@ additional context for risk-off states.
 
 \subsection{Information-Timing Contract}
 
-One of the most important research upgrades in the current version is that the
-pipeline makes its feature-availability assumptions explicit. Macro inputs are
+The pipeline makes its feature-availability assumptions explicit. Macro inputs are
 shifted forward by a configurable number of trading days before they are allowed
 into the backtest. This is still weaker than a true real-time vintage database,
 because it does not model revisions, but it is materially stronger than using
@@ -388,6 +357,12 @@ point-in-time fundamentals are already solved, but rather to make the timing
 caveat measurable and visible in the evaluation workflow.
 
 \section{Methodology}
+
+The methodology treats portfolio control as risk shaping rather than as a
+second forecasting contest. The alpha engine and constrained allocator are held
+fixed; what changes across methods is how each controller reshapes the induced
+return distribution through exposure rules, robust selection, payoff
+transformation, predictive planning, or learned mixtures.
 
 \subsection{Problem Formulation}
 
@@ -419,8 +394,8 @@ score is
 f_i = 0.30 m_i + 0.25 v_i + 0.25 q_i + 0.20 \ell_i.
 \]
 This choice reflects a balanced, multi-style factor book rather than a single
-directional bet. In the revised architecture, this factor book is the dominant
-alpha source, with the other retained sleeves acting mainly as stabilizers or
+directional bet. In this architecture, the factor book is the dominant alpha
+source, with the other retained sleeves acting mainly as stabilizers or
 confidence modifiers rather than as separate return engines.
 
 \subsection{Volatility and Regime Models}
@@ -451,18 +426,17 @@ signal quality. In the implementation, this is proxied by recent Spearman
 information coefficients between source scores and realized returns.
 
 This adaptive weighting is important because the retained sleeves are not
-equally informative across all market states. In the revised architecture,
-however, adaptive weighting is explicitly treated as an ablation rather than as
-an article of faith. Fixed weights remain a strong baseline precisely because
-the archived bundle suggests that adaptive combination does not obviously add
-value in the current sample.
+equally informative across all market states. In this architecture, however,
+adaptive weighting is explicitly treated as an ablation rather than as an
+article of faith. Fixed weights remain a strong baseline precisely because the
+archived bundle suggests that adaptive combination does not obviously add value
+in the current sample.
 
 \subsection{Constrained Allocator}
 
 The controller is not handed raw scores and asked to build a book from scratch.
-Instead, the revised architecture inserts a constrained intermediate allocator
-between the alpha layer and the control layer. The factor-anchored target book
-is
+Instead, the pipeline inserts a constrained intermediate allocator between the
+alpha layer and the control layer. The factor-anchored target book is
 \[
 w_t^{\text{target}} =
 0.90\,w_t^{\text{factor}} +
@@ -473,11 +447,13 @@ from a Ledoit--Wolf shrinkage covariance matrix.
 
 The allocator solves a small regularized problem of the form
 \[
-\min_w \quad
+\begin{aligned}
+\min_w \quad &
 \lambda_{\mathrm{risk}} w^\top \Sigma_t w
-- \lambda_{\alpha}\alpha_t^\top w
-+ \lambda_{\mathrm{anchor}}\lVert w - w_t^{\mathrm{target}} \rVert_2^2
-+ \lambda_{\mathrm{turn}}\lVert w - w_{t-1} \rVert_2^2
+- \lambda_{\alpha}\alpha_t^\top w \\
+&+ \lambda_{\mathrm{anchor}}\lVert w - w_t^{\mathrm{target}} \rVert_2^2 \\
+&+ \lambda_{\mathrm{turn}}\lVert w - w_{t-1} \rVert_2^2
+\end{aligned}
 \]
 subject to $w_i \ge 0$, $\sum_i w_i = 1$, per-asset caps, and group
 concentration limits. This intermediate layer is not only an architectural
@@ -487,7 +463,7 @@ allocator.
 
 \subsection{Control Methods}
 
-The completed frozen-bundle compares five families of control methods built on
+The completed frozen-bundle compares six families of control methods built on
 the same finance-first alpha engine and constrained allocator.
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item \textbf{Alpha and fixed-rule baselines.} The suite includes
@@ -502,6 +478,10 @@ the same finance-first alpha engine and constrained allocator.
 \item \textbf{Robust optimization.} A CVaR-aware robust allocator augments the
       constrained optimizer with downside-sensitive risk control and is the
       main non-learning advanced comparator.
+\item \textbf{Predictive control.} A model-predictive controller (MPC)
+      performs receding-horizon exposure planning with explicit turnover,
+      stress, and stabilizer penalties, providing a structured control-theory
+      comparator.
 \item \textbf{RL comparators.} Tabular portfolio Q-learning remains as a direct
       learned-controller baseline, and end-to-end PPO is retained as a
       monolithic comparator outside the main control-comparison suite.
@@ -566,7 +546,7 @@ the study that combines both in a structured way.
 
 \begin{center}
 \small
-\begin{tabular}{@{} l l @{}}
+\begin{tabular}{@{} p{0.26\linewidth} p{0.62\linewidth} @{}}
 \toprule
 \textbf{Method family} & \textbf{Risk-shaping interpretation} \\
 \midrule
@@ -580,6 +560,50 @@ Meta-control & Mixture of policies with adaptive expert weights \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\subsection{Theoretical Grounding}
+
+\paragraph{Proposition 1 (tail-shaping improvement under mild regularity).}
+Let $R$ be a one-step portfolio return with continuous distribution supported on
+$[r_{\min}, r_{\max}]$, let $q_\alpha:=q_\alpha(R)<\tau$ denote the lower
+$\alpha$-quantile, and define
+\[
+g_m(r)=r-c(m)+\lambda_m(\tau-r)_+^2.
+\]
+Assume (i) $g_m$ is nondecreasing on $[r_{\min},\tau]$, equivalently
+$2\lambda_m(\tau-r_{\min})\le 1$, and (ii)
+$c(m)\le \lambda_m(\tau-q_\alpha)^2$. Then
+\begin{align*}
+\mathbb{E}[g_m(R)]
+&=\mathbb{E}[R]-c(m)+\lambda_m \mathbb{E}\!\left[(\tau-R)_+^2\right], \\
+\operatorname{CVaR}_\alpha(-g_m(R))
+&\le \operatorname{CVaR}_\alpha(-R)-\delta_\alpha(m),
+\end{align*}
+where $\delta_\alpha(m):=\lambda_m(\tau-q_\alpha)^2-c(m)\ge 0$.
+
+\emph{Proof.} Let $A_\alpha:=\{R\le q_\alpha\}$. Because $q_\alpha<\tau$, for
+every $r\in A_\alpha$,
+\[
+g_m(r)-r \ge -c(m)+\lambda_m(\tau-q_\alpha)^2 = \delta_\alpha(m).
+\]
+Assumption (i) preserves the ordering of tail states on $[r_{\min},\tau]$, so
+the worst $\alpha$-tail of $g_m(R)$ is still attained on $A_\alpha$. Therefore
+\begin{align*}
+\operatorname{CVaR}_\alpha(-g_m(R))
+&= -\mathbb{E}[g_m(R)\mid A_\alpha] \\
+&\le -\mathbb{E}[R\mid A_\alpha]-\delta_\alpha(m) \\
+&= \operatorname{CVaR}_\alpha(-R)-\delta_\alpha(m).
+\end{align*}
+The expectation identity follows by expanding $g_m(R)$ pointwise and taking
+expectations. Thus convexity reduces lower-tail risk whenever the protected-tail
+gain dominates carry. \hfill $\square$
+
+In the reference D+ split, $\tau=0$, the strong-mode coefficient is
+$\lambda_m=4$, and the observed raw-return minimum is about $-11.3\%$, so
+assumption (i) implies $2\lambda_m(\tau-r_{\min})\approx 0.90<1$ and is
+satisfied in the reported sample. The key implication is operational rather
+than cosmetic: performance improvements arise not from better prediction, but
+from improved shaping of the return distribution's left tail.
 
 \subsection{CVaR-Robust Controller}
 
@@ -686,11 +710,9 @@ changing state size or model capacity.
 
 \subsection{Portfolio RL}
 
-The revised portfolio RL state is deliberately minimal. It is constructed from
-the current alpha-score cross-section, the current portfolio-weight summary, and
-recent portfolio returns. This pruned state replaces the richer regime,
-uncertainty, volatility, and hedge-specific state variables used in the older
-architecture.
+The portfolio RL state is deliberately minimal. It is constructed from the
+current alpha-score cross-section, the current portfolio-weight summary, and
+recent portfolio returns.
 
 If the RL agent chooses invested fraction $b_t$ and active overlay size $\tau_t$,
 the final invested portfolio is approximately
@@ -704,8 +726,7 @@ working factor engine while still letting RL modulate aggressiveness.
 
 \subsection{Reward Design}
 
-The revised architecture uses a Sortino-style reward by default. In compact
-form,
+The default reward is a Sortino-style objective. In compact form,
 \[
 R_t^{\mathrm{portfolio}}
 = \frac{r_t - \hat{\mu}_t}{\hat{\sigma}^{\mathrm{down}}_t + \varepsilon},
@@ -744,24 +765,16 @@ rather than purely cosmetic.
 
 \section{Experimental Design}
 
-The revised frozen-bundle used in the paper now consists of two disjoint
-universe runs, each with 3{,}269 daily observations from April 2, 2013 through
-March 30, 2026. The archived bundles reported here are the timestamped results
-folders \texttt{results/20260330\_221820\_universe\_A} and
-\texttt{results/20260331\_002747\_universe\_B}. Each contains legacy
-ablations, 19 control-method candidates across three train/test split
-settings, a strict-timing check, six rolling windows, four cost settings,
-three rebalance-band settings, three macro-lag settings, four reward settings,
-and five blocked time-series CV folds. The manuscript is tied to those
-explicit artifact bundles, especially \texttt{research\_control\_comparison.csv},
-\texttt{research\_metrics.csv}, \texttt{research\_control\_significance.csv},
-and the companion CSV and PNG outputs. This does not eliminate prior
-exploratory iteration, but it does make the reported bundles explicit and
-reproducible.
-The codebase, manuscript sources, and artifact layout are maintained in the
-public repository \url{https://github.com/ioan-hedea/quant-paper-lab}, so the
-paper's frozen-bundle framing points to a concrete implementation record rather
-than to a private offline archive.
+The evaluation protocol uses two disjoint universe runs, each with 3{,}269
+daily observations from April 2, 2013 through March 30, 2026. Each archived
+bundle contains the same core suite: legacy ablations, 19 control-method
+candidates across three train/test split settings, a strict-timing check, six
+rolling windows, four cost settings, three rebalance-band settings, three
+macro-lag settings, four reward settings, and five blocked time-series CV
+folds. Reported claims are tied to the archived CSV and figure artifacts
+released with the codebase, manuscript, and bundle layout in the public
+repository \url{https://github.com/ioan-hedea/quant-paper-lab}. Exact bundle
+paths are listed in the appendix.
 
 Within that archived suite, action ladders, optimizer settings, reward choices,
 and comparison baselines are held fixed across ablations, split-fraction tests,
@@ -831,12 +844,37 @@ research artifacts.
 
 \section{Results}
 
-This section first reports the new control-comparison headline, then uses the
-legacy ablation and full-pipeline diagnostics as secondary evidence about which
-sources of complexity were worth keeping. The key change relative to earlier
-drafts is that the paper no longer treats RL as the protagonist. The main
-question is which controller is strongest on top of the same finance-first
-alpha engine.
+Three answers organize the results. First, the robust family defines the
+frontier in both universes, with \texttt{D\_plus\_convexity} strongest in
+Universe A and plain \texttt{D\_cvar\_robust} the more portable winner in
+Universe B. Second, simple rules remain credible downside-control baselines but
+do not displace the robust frontier. Third, learning helps most when used as
+meta-control over structured experts; learning-first controllers do not
+dominate the shared alpha engine.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Scannable summary of the main controller families.}
+\label{tab:family_summary}
+\begin{tabular}{@{} p{1.35cm} p{1.15cm} p{1.65cm} p{1.45cm} @{}}
+\toprule
+\textbf{Family} & \textbf{Role} & \textbf{Strength} & \textbf{Weakness} \\
+\midrule
+Robust & Risk control & Best Sharpe frontier in this evaluation & Can be conservative \\
+Convexity & Tail shaping & Strong conditional edge in Universe A & Less portable across universes \\
+Meta-control & Adaptive mixing & Best learned region of the design space & Still below robust frontier \\
+MPC & Predictive control & Strong low-drawdown profile & Lower upside capture \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Key findings.}
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt, topsep=3pt]
+\item In this frozen-bundle evaluation, the robust family defines the frontier.
+\item Convexity adds a conditional edge when left-tail asymmetry is strong.
+\item Learning is most useful as meta-control over already-credible experts.
+\end{itemize}
 
 \subsection{Main Result: Control Comparison}
 
@@ -858,14 +896,20 @@ Annualized figures.}
 \textbf{Controller} & \textbf{A Ret.} & \textbf{A Sh.} & \textbf{A Max DD} & \textbf{B Ret.} & \textbf{B Sh.} & \textbf{B Max DD} \\
 \midrule
 No control (alpha engine) & 9.3\% & 0.41 & $-$19.5\% & 10.5\% & 0.58 & $-$12.0\% \\
+\midrule
 A1: Fixed & 9.0\% & 0.40 & $-$18.6\% & 10.1\% & 0.58 & $-$11.3\% \\
 A4: Regime rules & 8.8\% & 0.42 & $-$15.8\% & 9.4\% & 0.55 & $-$10.4\% \\
+\midrule
 B1: LinUCB & 8.8\% & 0.42 & $-$17.5\% & 9.9\% & 0.58 & $-$10.8\% \\
+\midrule
 C: Supervised & 8.7\% & 0.40 & $-$19.0\% & 9.8\% & 0.59 & $-$11.7\% \\
+\midrule
 D: CVaR-robust & 17.7\% & 0.81 & $-$26.4\% & \textbf{14.0\%} & \textbf{0.70} & $-$14.5\% \\
 \textbf{D+: CVaR + convexity} & \textbf{17.8\%} & \textbf{0.84} & \textbf{$-$18.6\%} & 12.9\% & 0.64 & $-$14.1\% \\
+\midrule
 E: Council & 12.8\% & 0.65 & $-$20.9\% & 11.6\% & 0.65 & $-$12.4\% \\
 G: MLP meta & 12.2\% & 0.61 & $-$19.8\% & 11.2\% & 0.61 & $-$12.3\% \\
+\midrule
 F: CMDP-Lagrangian & 8.2\% & 0.37 & $-$18.5\% & 9.4\% & 0.54 & $-$11.0\% \\
 H: MPC & 6.0\% & 0.56 & $-$6.7\% & 6.1\% & 0.64 & \textbf{$-$3.9\%} \\
 RL: Q-learning & 8.3\% & 0.43 & $-$15.0\% & 9.9\% & 0.58 & $-$10.9\% \\
@@ -1012,10 +1056,10 @@ the MLP gate, and MPC on Sharpe at the reference split. Its edge over plain
 \texttt{D} remains economically positive but not statistically decisive. In
 Universe B, the point-estimate winner is plain \texttt{D}, yet the reference
 split is much tighter: differences versus \texttt{D+}, the council, MPC, and
-SPY are not statistically decisive on Sharpe. The right claim is therefore
-family-level rather than universal: robust risk shaping dominates the design
-space across both universes, but the extra convexity layer is strongly
-supported only where tail asymmetry is pronounced.
+SPY are not statistically decisive on Sharpe. This Universe-A versus
+Universe-B distinction is one of the paper's central findings: robust risk
+shaping dominates both universes, but the extra convexity layer is strongly
+supported only where left-tail asymmetry is pronounced.
 
 The strongest practical insight from the new extensions is now conditional.
 Convexity-aware payoff shaping directly addresses the earlier CVaR caveat in
@@ -1028,7 +1072,7 @@ the transformed version. The remaining Pareto tension is therefore between the
 return-seeking robust stack in Universe A, the more portable plain-CVaR stack
 in Universe B, and the clean defensive profile of \texttt{H\_mpc}.
 
-\begin{quote}\small\noindent\textbf{Why the robust family wins.} (1) $\mathcal{Q}_{\text{CVaR}}$ improves tail-aware portfolio selection. (2) $\mathcal{T}_{\text{convex}}$ repairs the residual pathwise drawdown weakness of plain CVaR when left-tail asymmetry is strong. (3) When that asymmetry is milder, plain \texttt{D} and the low-exposure \texttt{H\_mpc} become more competitive. (4) Learned controllers improve adaptivity, but not enough to replace explicit risk shaping.\end{quote}
+\begin{quote}\small\noindent\textbf{RQ summary.} \textbf{RQ1:} In this frozen-bundle evaluation, the robust family is strongest in both universes, with \texttt{D+} best in Universe A and plain \texttt{D} best in Universe B. \textbf{RQ2:} Simple rules remain competitive for downside control, especially A4 in Universe A and A1 in Universe B. \textbf{RQ3:} Learning helps mainly as meta-control; no learning-first controller beats the robust frontier in this evaluation.\end{quote}
 
 \paragraph{Regime-conditioned performance.}
 Reference-split regime slices clarify why the universe ranking changes. In
@@ -1062,210 +1106,42 @@ providing the shallowest drawdowns. \textbf{RQ3}: answered negatively for
 learning-based control; even the learned meta-controllers remain below the best
 optimization-based method.
 
-\subsection{Legacy Ablation and Complexity Pruning}
-
-The control-comparison headline does not make the legacy ablation evidence
-irrelevant. On the contrary, the ablation table explains why the architecture
-was revised in the first place. It asks whether the old RL-heavy stack was
-actually earning its complexity before the broader controller comparison was
-run. The \emph{factor-only benchmark} row in Table~\ref{tab:ablation_summary}
-belongs to this legacy ablation suite and is therefore not directly comparable
-to the no-control baseline in Table~\ref{tab:metrics}; the two tables summarize
-different archived suites with different purposes. Mechanically, the legacy
-ablation uses the earlier pruning harness and its own evaluation schedule, so
-its 0.82 factor-only row reflects the factor core inside that older context
-rather than the no-control controller row from the revised comparison suite.
-In particular, the legacy factor-only row comes from a looser pruning-harness
-configuration, whereas the no-control row in Table~\ref{tab:metrics} still
-passes through the revised constrained allocator with turnover penalties,
-long-only caps, and group limits, which compresses both return and volatility.
-
-\begin{table*}[t]
-\centering
-\caption{Legacy ablation summary across the retained pruning suite. Universe A
-shows the stronger negative-control effect; Universe B is milder but still
-below the factor core.}
-\label{tab:ablation_summary}
-\begingroup\small
-\begin{tabular}{@{} l r r r r @{}}
-\toprule
-\textbf{Component} & \textbf{A Sharpe} & \textbf{A Calmar} & \textbf{B Sharpe} & \textbf{B Calmar} \\
-\midrule
-Factor-only benchmark       & 0.82 & 0.74 & 0.71 & 0.99 \\
-Allocator fixed weights     & 0.45 & 0.51 & 0.57 & 0.88 \\
-Alpha stack no RL           & 0.41 & 0.47 & 0.58 & 0.90 \\
-Portfolio RL (fixed alpha)  & 0.36 & 0.49 & 0.44 & 0.77 \\
-Full pipeline               & 0.29 & 0.43 & 0.45 & 0.77 \\
-\bottomrule
-\end{tabular}
-\endgroup
-\end{table*}
-
-\begin{table}[t]
-\centering
-\caption{Rolling-window robustness summary for the full pipeline.}
-\label{tab:robustness_summary}
-\begingroup\small
-\begin{tabular}{@{} >{\raggedright\arraybackslash}p{0.70\columnwidth} r @{}}
-\toprule
-\textbf{Statistic} & \textbf{Value} \\
-\midrule
-Rolling windows                                    & 6 \\
-Median full-pipeline Sharpe                        & 0.59 \\
-Median full-pipeline Calmar                        & 1.07 \\
-Median full-pipeline Max DD                        & $-$8.9\% \\
-Frac. windows full beats factor-only benchmark on drawdown & 67\% \\
-Frac. windows full beats factor-only benchmark on Calmar   & 17\% \\
-Frac. windows full beats SPY on Sharpe             & 17\% \\
-Frac. windows full beats SPY on Calmar             & 17\% \\
-\bottomrule
-\end{tabular}
-\endgroup
-\end{table}
-
-The ablation story remains negative for the old learned stack in both
-universes, even though the severity differs. In Universe A, the factor-only
-benchmark reaches mean Sharpe 0.82 while the legacy full pipeline reaches only
-0.29. In Universe B, the factor-only benchmark still leads at 0.71 versus 0.45
-for the legacy full pipeline. Fixed alpha combination is stronger than the
-fully learned branch, and every additional learned layer beyond the factor core
-remains difficult to justify. This is exactly the pruning result that motivated
-the shift from an RL-centric paper to a control-method comparison paper.
-
-\noindent\textit{Implication for RQ3.} The old RL-heavy complexity is not
-justified. The factor core is the credible source of alpha, and the original
-full pipeline is best interpreted as a negative control that motivated the
-revised study.
-
-\subsection{Legacy Full-Pipeline Reference and Significance}
-
-The old full pipeline is retained as a secondary reference because it anchors
-the transition from the earlier project narrative to the new one. In the
-refreshed timestamped confidence-interval artifact, its point estimates are
-9.0\% annualized return, 0.423 Sharpe, 0.459 Calmar, and $-$19.6\% maximum
-drawdown.
-
-The bootstrap significance summary in Table~\ref{tab:legacy_bootstrap_significance}
-shows that this legacy full pipeline is significantly worse than the
-factor-only benchmark on Sharpe and annualized return, significantly worse than
-vol-targeting on both dimensions, and materially weaker than
-drawdown-deleveraging on annualized return. It is not statistically
-distinguishable from SPY or end-to-end PPO on Sharpe in the completed bundle.
-
-\begin{table*}[t]
-\centering
-\caption{Block-bootstrap significance for the legacy full pipeline versus
-selected baselines (Sharpe deltas).}
-\label{tab:legacy_bootstrap_significance}
-\small
-\begin{tabular}{@{} p{0.42\textwidth} r r r @{}}
-\toprule
-\textbf{Comparison} & \textbf{Delta Sharpe} & \textbf{95\% CI} & \textbf{p-value} \\
-\midrule
-Full -- SPY                   & -0.16 & [-0.91, 0.51] & 0.615 \\
-Full -- Factor-only benchmark & -0.58 & [-1.14, -0.15] & 0.005 \\
-Full -- Vol-target            & -0.47 & [-0.98, -0.03] & 0.035 \\
-Full -- DD-Delever            & -0.50 & [-1.04, 0.06] & 0.070 \\
-Full -- E2E RL (PPO)          & -0.14 & [-1.19, 0.81] & 0.820 \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-The Jobson--Korkie summary tells the same story more narrowly: the legacy full
-pipeline is significantly worse than the factor benchmark on Sharpe at the
-5\% level, while differences versus SPY, PPO, and the stronger rule baselines
-are not statistically decisive. So even as a legacy reference, the old RL
-branch does not recover the central economic claim.
-
-\subsection{Reward Sensitivity and Robustness of the Legacy Branch}
-
-Reward design affects where the retained full-pipeline controller lands on the
-risk-return frontier, but only within a relatively narrow band. Across the
-reward-function ablation, the Sortino reward is best for the legacy branch,
-reaching about 9.1\% annualized return and 0.44 Sharpe, while the broader
-ranking versus factor-only, rules, and robust optimization is unchanged.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Reward-function ablation for the full pipeline on the revised bundle.}
-\label{tab:reward_ablation}
-\begin{tabular}{@{} l r r r r @{}}
-\toprule
-\textbf{Reward} & \textbf{Return} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
-\midrule
-Differential Sharpe & 9.3\% & 0.45 & $-$17.0\% & 0.55 \\
-Return              & 9.5\% & 0.48 & $-$17.2\% & 0.55 \\
-Sortino             & 9.5\% & 0.48 & $-$17.0\% & 0.56 \\
-Mean-Variance       & 9.2\% & 0.45 & $-$17.8\% & 0.52 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The rolling-window and time-series cross-validation diagnostics remain useful as appendix diagnostics for the retained legacy branch, not as main sources of evidence for the revised control-comparison claim. The rolling-window summary
-shows median full-pipeline Sharpe 0.59, median Calmar 1.09, and median maximum
-drawdown $-$8.9\%. The corresponding benchmark-beat fractions remain weak:
-the legacy full pipeline beats SPY on Sharpe in only 17\% of windows and beats
-the factor benchmark on Calmar in only 17\% of windows. The blocked time-series
-CV summary is similarly modest, with Sharpe 0.41 $\pm$ 0.57 and Calmar
-0.72 $\pm$ 0.51 across five folds.
-
-\noindent\textit{Implication for the overall claim.} The legacy branch still
-does not show a structural edge. Its main value in the revised paper is as a
-transparent negative result that motivated the broader controller comparison.
+\paragraph{Legacy pruning reference.}
+A separate RL-centric pruning harness is retained for transparency, but its
+role in the paper is diagnostic rather than central. Across both universes, the
+factor core remains stronger than the legacy full learned stack, so the old
+branch mainly marks the boundary of the design space and helps justify the
+broader controller-comparison protocol. Detailed ablation, significance,
+rolling-window, and reward diagnostics for that legacy branch are collected in
+Appendix Section~\ref{sec:legacy_appendix}.
 
 
 \section{Discussion}
 
-The discussion can now be stated more directly. The paper's main contribution is a risk-shaping framework for portfolio control, not merely a 19-controller leaderboard. Under a shared alpha engine and shared timing/cost protocol, the winning design combines tail-aware selection of portfolio outcomes through CVaR with tail-aware transformation of realized payoffs through convex protection. The remaining controller comparisons then act as boundary results around that central mechanism.
+The discussion focuses on mechanism rather than restating the leaderboard. The
+main claim is that portfolio control is best understood here as risk shaping:
+the strongest controllers improve the left tail of the induced return
+distribution under shared alpha, timing, and cost assumptions. Across the two
+universes, the same family dominates but not with a universal variant:
+\texttt{D+} is strongest when tail asymmetry is pronounced, plain
+\texttt{D} is the more portable robust baseline, and \texttt{H\_mpc} is the
+clearest low-drawdown alternative.
 
-The experimental results support three conclusions of methodological importance.
-
-First, the control-mechanism comparison has a strongest family rather than a
-single universal winner. In Universe A, \texttt{D\_plus\_convexity} leads the
-finished suite, reaching mean Sharpe 0.84 and Calmar 0.95 versus 0.41 for the
-no-control alpha engine, 0.42 for the best non-meta learner LinUCB, and 0.65
-for the strongest learned controller \texttt{E\_council}. In Universe B, plain
-\texttt{D\_cvar\_robust} is strongest at 0.70 Sharpe, with the council and
-MPC clustered just below it near 0.65. In other words, once the factor, GARCH,
-and HMM alpha engine is fixed, the biggest incremental value still comes from
-explicit downside-aware optimization rather than from additional
-sequential-learning complexity. The layered interpretation also matters:
-convexity materially improves the robust baseline in Universe A, while plain
-CVaR is the more portable winner in Universe B.
-
-Second, simple rules are stronger than a complexity-first story would suggest.
-Regime-aware rules reach 0.415 mean Sharpe with better maximum drawdown than
-the no-control alpha engine, while fixed exposure and volatility targeting provide
-clean, interpretable trade-offs between participation and protection. This is a
-useful empirical result in its own right: the paper does not need learned
-control to justify itself, because a disciplined comparison already shows that
-simple rules can be credible, competitive baselines.
-
-Third, the learning-based methods are mixed rather than dominant. LinUCB is the
-best non-meta learner and does improve on the no-control alpha engine, but the
-bandits, supervised controller, CMDP-Lagrangian controller, and Q-learning RL
-all remain below the robust stack on risk-adjusted performance. The positive
-exception is learned meta-control: \texttt{E\_council} reaches about 0.65
-Sharpe in both universes and \texttt{G\_mlp\_meta} remains close behind, while
-their convexity-augmented variants give back Sharpe in exchange for somewhat
-shallower drawdowns. That makes meta-control a plausible refinement direction
-even though it still does not unseat the robust frontier. That negative result
-is not an embarrassment; it is part of the methodological contribution. The
-point of the revised paper is to delimit where learning helps and where
-simpler or more structured controllers remain stronger. Learning contributes
-most when it is used to arbitrate among already-credible structured
-controllers rather than to replace financial structure end to end.
-
-What did not work is therefore just as informative as what did. The old
-RL-heavy stack still collapses in the legacy ablation table. Drawdown-based
-deleveraging is weaker than the better simple rules. Ensemble rules are more
-stable than exciting. CMDP-Lagrangian control does not bridge the gap between
-optimization and learning, and tabular RL remains weak even after being given a
-more favorable split schedule. These failures are precisely what turn the
-project from a prototype report into a more credible control-method study.
+The learning results sharpen that claim rather than weaken it. LinUCB is the
+strongest non-meta learner, the council and MLP gates materially improve over
+the standalone learners, and CMDP plus tabular RL do not close the gap to the
+robust frontier in this evaluation. Learning therefore contributes most when it arbitrates among
+already-credible structured controllers rather than when it replaces financial
+structure end to end.
 
 \subsection{Mechanism of CVaR + Convexity}
+
+\begin{quote}\small\noindent\textbf{Why D+ wins.} (1) $\mathcal{Q}_{\text{CVaR}}$
+improves tail-aware portfolio selection. (2)
+$\mathcal{T}_{\text{convex}}$ repairs the residual pathwise drawdown weakness
+of plain CVaR when left-tail asymmetry is strong. (3) The combination preserves
+participation while reducing left-tail damage. (4) Learned controllers improve
+adaptivity, but not enough to replace explicit risk shaping.\end{quote}
 
 Performance improvements arise not from better prediction, but from better
 shaping of the return distribution's left tail. Variance treats upside and
@@ -1311,66 +1187,11 @@ the remaining mass between regime rules and LinUCB as conditions change. Even
 with meta-control and constrained learning extensions, the structured robust
 optimization approach remains dominant.
 
-\paragraph{Proposition 1 (tail-shaping improvement under mild regularity).}
-Let $R$ be a one-step portfolio return with continuous distribution supported on
-$[r_{\min}, r_{\max}]$, let $q_\alpha:=q_\alpha(R)<\tau$ denote the lower
-$\alpha$-quantile, and define
-\[
-g_m(r)=r-c(m)+\lambda_m(\tau-r)_+^2.
-\]
-Assume (i) $g_m$ is nondecreasing on $[r_{\min},\tau]$, equivalently
-$2\lambda_m(\tau-r_{\min})\le 1$, and (ii)
-$c(m)\le \lambda_m(\tau-q_\alpha)^2$. Then
-\begin{align*}
-\mathbb{E}[g_m(R)]
-&=\mathbb{E}[R]-c(m)+\lambda_m \mathbb{E}\!\left[(\tau-R)_+^2\right], \\
-\operatorname{CVaR}_\alpha(-g_m(R))
-&\le \operatorname{CVaR}_\alpha(-R)-\delta_\alpha(m),
-\end{align*}
-where $\delta_\alpha(m):=\lambda_m(\tau-q_\alpha)^2-c(m)\ge 0$.
-
-\emph{Proof.} Let $A_\alpha:=\{R\le q_\alpha\}$. Because $q_\alpha<\tau$, for
-every $r\in A_\alpha$,
-\[
-g_m(r)-r \ge -c(m)+\lambda_m(\tau-q_\alpha)^2 = \delta_\alpha(m).
-\]
-Assumption (i) preserves the ordering of tail states on $[r_{\min},\tau]$, so
-the worst $\alpha$-tail of $g_m(R)$ is still attained on $A_\alpha$. Therefore
-\begin{align*}
-\operatorname{CVaR}_\alpha(-g_m(R))
-&= -\mathbb{E}[g_m(R)\mid A_\alpha] \\
-&\le -\mathbb{E}[R\mid A_\alpha]-\delta_\alpha(m) \\
-&= \operatorname{CVaR}_\alpha(-R)-\delta_\alpha(m).
-\end{align*}
-The expectation identity follows by expanding $g_m(R)$ pointwise and taking
-expectations. Thus convexity reduces lower-tail risk whenever the protected-tail
-gain dominates carry. \hfill $\square$
-
-In the reference D+ split, $\tau=0$, the strong-mode coefficient is $\lambda_m=4$, and the observed raw-return minimum is about $-11.3\%$, so assumption (i) implies $2\lambda_m(\tau-r_{\min})\approx 0.90<1$ and is satisfied in the reported sample.
-
-The key mechanism is now explicit: $g_m(r)\approx r-c(m)$ for ordinary states
-with $r\ge\tau$, while stressed states with $r<\tau$ receive a state-dependent
-upward adjustment. Convexity therefore improves performance by reshaping the
-left tail of the return distribution, not by improving prediction.
-
-\subsection{Regime-Dependent Controller Effectiveness}
-
-The results are consistent with a regime-dependent optimality hypothesis.
-Controllers differ primarily in how they respond to tail risk, so their
-relative ranking changes across bull, neutral, bear, and crisis states.
-Light-control methods remain attractive in benign markets, simple rules and
-bandits become competitive in quieter transitional states, plain CVaR improves
-when losses are more persistent, and D+ is strongest in the true crisis slice
-where both scenario selection and payoff reshaping matter at once.
-
-This hypothesis helps organize the empirical evidence. In the 2021 bull market,
-SPY remains the cleanest upside benchmark and the lighter controllers do not
-need to overreact. In the 2022 bear period, regime rules remain attractive
-when the binding objective is shallower realized drawdown. In the 2020 crash,
-however, D+ is the standout because it combines crisis-aware reweighting with a
-selective convex response. Controller dominance is therefore conditional, not
-universal: methods differ mainly in how aggressively and smoothly they reshape
-the left tail.
+Because that mechanism depends on how much left-tail asymmetry is present,
+controller dominance is regime-dependent. D+ is strongest in the crisis-like
+slices where payoff reshaping becomes economically meaningful, plain D is the
+more portable robust baseline when that asymmetry is milder, and H\_mpc remains
+attractive when shallow drawdown is the binding objective.
 
 \subsection{Meta-Control as Mixture-of-Policies}
 
@@ -1389,7 +1210,7 @@ correlation with regime-belief switches. The gate therefore reacts most around
 regime transitions by modestly leaning further toward robust control rather
 than by collapsing to a one-expert policy.
 
-At the same time, the meta-controllers still remain below the robust frontier.
+At the same time, the meta-controllers still remain below the robust frontier in this evaluation.
 That gap is informative. Variance reduction alone is not enough to match direct
 distributional shaping. The logistic council and the MLP gate can learn when to
 lean more heavily on CVaR, rules, or LinUCB, but the simpler logistic council
@@ -1415,7 +1236,7 @@ whether adding a dual variable closes the gap between optimization and RL.
 The answer from the finished bundle is no. Meta-control is genuinely
 interesting, because it improves materially over the standalone learners and
 the council/MLP pair marks the strongest learned region of the design space.
-But even that result still sits below the robust frontier, and
+But even that result still sits below the robust frontier in this evaluation, and
 CMDP-Lagrangian control remains much closer to the weaker learning baselines
 than to the best risk-shaping methods. That pattern suggests that, for daily
 portfolio rebalancing under noisy observations, directly encoding downside
@@ -1455,88 +1276,57 @@ compare structured rules, learning, robust optimization, and payoff-shaping
 extensions over a shared alpha engine before accepting additional controller
 complexity.
 
-\section{Threats to Validity and Future Work}
+\section{Threats to Validity}
 
-The implementation remains research code, and several caveats apply. Macro
-inputs are shifted by a configurable lag, but they are not full vintage series
-with revision-aware histories. SEC enrichment can be used as a static
-cross-sectional prior, but it still does not constitute a true point-in-time
-fundamentals database. Transaction costs are more realistic than before, yet
-they remain stylized rather than venue-specific. The robustness engine still
-depends on one underlying historical sample even when it slices that sample in
-multiple ways.
+Several caveats matter for interpretation. First, the timing discipline is
+stronger than in many exploratory backtests but is not a perfect point-in-time
+reconstruction. Macro inputs are lagged rather than vintage-aware, SEC
+enrichment remains a static cross-sectional prior rather than a revision-aware
+fundamentals panel, and the execution model remains stylized rather than
+venue-specific.
 
-Several additional threats deserve explicit acknowledgement. First, the design
-has been iterated by observing backtest behavior, which raises the possibility
-of researcher degrees of freedom even when each individual change is motivated.
-Second, the traded universe is broader than in the earlier prototype but still
-narrow relative to institutional equity universes, so the results may depend
-partly on the selected names. Third, daily data are appropriate for a medium-
-horizon allocation study but cannot validate intraday execution claims. Finally,
-the project deliberately leans on free or public data sources, which improves
-accessibility but necessarily limits point-in-time fidelity and market
-microstructure realism.
+Second, external validity is limited by scope. Two disjoint daily U.S.-equity
+universes are materially stronger evidence than one curated bundle, but they
+are still narrower than institutional universes and therefore do not establish
+the same ranking for other asset classes, frequencies, or market microstructure
+regimes.
 
-A further caveat is benchmark fairness: although the rule-based and PPO
-baselines are designed to be strong and informative, their exact specification
-still influences comparative conclusions. Because the evaluation suite reports
-many metrics and comparator strategies, some apparent wins and losses should
-also be interpreted with the usual caution around multiple comparisons.
-External validity is also limited: conclusions drawn from a daily U.S.-equity
-allocation setting may not transfer unchanged to other asset classes,
-frequencies, or market microstructure regimes.
+Third, the design has been iterated by observing backtest behavior. That raises
+researcher-degrees-of-freedom concerns even though the reported comparison is
+shared across controllers, frozen before interpretation, and released with
+explicit artifacts and code.
 
-The currently reported robustness summary is still based on only six rolling
-windows, five blocked time-series CV folds, and one underlying historical
-sample per universe. The workshop interpretation should therefore be that the
-robustness engine is now part of the methodology, not that robustness has been
-exhaustively established across many independent market environments. At the
-reference split, the universe-specific significance story is now sharper than
-before but still not exhaustive in the strongest sense: Universe A provides
-direct Sharpe separation for \texttt{D+} versus several non-robust baselines
-and both learned meta-controllers, whereas Universe B shows a tighter cluster
-in which plain \texttt{D}, \texttt{D+}, \texttt{E}, and \texttt{H} are not
-cleanly separated on Sharpe. What remains future work is an aggregated
-multi-split or multi-window significance analysis across both universes,
-together with equally complete tables for the broader meta-controller family.
-
-Natural next steps follow directly from this new result. The highest-value
-extensions are broader universes and asset classes, stricter point-in-time data
-treatment, aggregated multi-split significance, more systematic benchmark
-tuning, and deeper analysis of when council-style meta-control or convexity
-modes are activated. If more advanced learned
-controllers re-enter the stack later, they should do so as separately validated
-comparators rather than as assumed core architecture.
+Fourth, the robustness evidence is informative but not exhaustive. Rolling
+windows, blocked time-series cross-validation, and reference-split bootstrap
+tests make the evaluation more disciplined, yet they still draw on one
+historical sample per universe. The right interpretation is therefore
+comparative and conditional within this evaluation rather than universal. The
+most valuable next steps are broader universes, stricter point-in-time data,
+and fuller multi-split significance analysis.
 
 \section{Conclusion}
 
-This paper reframes the project from an RL question into a broader empirical
-comparison of control mechanisms for factor-based portfolio management. The
-shared finance-first alpha engine remains modular and interpretable; the main
-scientific question is which controller adds the most value once that engine is
-already in place.
+This paper studied which controller adds the most value on top of a
+finance-first alpha engine with an explicit constrained allocator. Its central
+conceptual contribution is a risk-shaping operator lens that distinguishes
+controllers by how they alter the induced return distribution through selection
+operators, outcome transformations, or mixtures of policies.
 
-The completed frozen-bundles give a more nuanced but stronger answer. Across
-both universes, the robust family is the clear frontier. The
-convexity-enhanced stack \texttt{D\_plus\_convexity} is the peak performer in
-Universe A, plain \texttt{D\_cvar\_robust} is the most portable robust baseline
-and the winner in Universe B, \texttt{E\_council} is the strongest learned
-controller across both universes, and \texttt{H\_mpc} occupies the cleanest
-low-drawdown frontier point. Simple rules remain credible low-complexity
-baselines, but the learning-based methods, including CMDP and tabular RL, do
-not beat the best optimization-based approach.
+The empirical result is consistent across both universes at the family level:
+in this frozen-bundle evaluation, robust risk-aware control defines the
+frontier. Convexity-enhanced CVaR is strongest when left-tail asymmetry is
+pronounced, plain CVaR is the more portable robust baseline, simple rules
+remain credible low-complexity alternatives, and learning helps most as
+meta-control rather than as primary control. The strongest learned methods
+narrow the gap but do not overturn the
+robust-optimization result.
 
-Equally importantly, the paper leaves behind a frozen-bundle evaluation
-protocol that can support future controller comparisons under a consistent
-empirical standard. In the reported sample, the evidence supports a stronger
-conceptual claim than the earlier draft: portfolio control is best understood
-here as risk shaping. Explicitly distribution-aware selection dominates the
-learned alternatives across both universes, convex payoff shaping is highly
-valuable when tail asymmetry is strong, and learning contributes most as
-meta-control rather than as the primary decision layer. The paper does not
-claim that \texttt{D+} is universally optimal; it claims that under a fixed
-finance-first alpha engine and shared experimental protocol, explicit risk
-shaping dominates the learned alternatives tested here.
+The supported claim is therefore positive and specific: under a shared
+finance-first alpha engine and common timing and cost protocol, explicit risk
+shaping dominates the learned alternatives tested here. The next step is not a
+broader uncontrolled model sweep, but broader validation: more universes,
+stricter point-in-time data, and fuller significance analysis across additional
+environments.
 
 \appendix
 
@@ -1544,11 +1334,11 @@ shaping dominates the learned alternatives tested here.
 
 \subsection{Revised-Study Snapshot}
 
-The revised frozen-bundle reported in the paper corresponds to the simplified
-finance-first stack summarized in Table~\ref{tab:archsnapshot}. The most
-important change relative to the earlier project versions is that the paper now
-evaluates a family of controllers on top of the same allocator rather than
-trying to defend one learned controller in isolation.
+The archived study reported in the paper corresponds to the simplified
+finance-first stack summarized in Table~\ref{tab:archsnapshot}. The key design
+choice is that the comparison evaluates a family of controllers on top of the
+same allocator rather than treating learned control as the only advanced
+option.
 
 \begin{table*}[t]
 \centering
@@ -1637,7 +1427,126 @@ these artifacts make it easier to compare results across alternative timing,
 cost, and control assumptions without manually reconstructing the experimental
 context after the fact.
 
-\subsection{Supplementary Diagnostic Figures}
+\section{Legacy Ablation Diagnostics}
+\label{sec:legacy_appendix}
+
+The legacy RL-centric pruning harness is retained as supplementary evidence
+because it clarifies the boundary of the design space. Its role is not to carry
+the paper's main claim, but to show why the final study compares controller
+families on top of a stable factor-driven core. The \emph{factor-only
+benchmark} row in Table~\ref{tab:ablation_summary} belongs to this pruning
+harness and is therefore not directly comparable to the no-control controller
+in Table~\ref{tab:metrics}; the former comes from the legacy pruning schedule,
+whereas the latter still passes through the shared constrained allocator with
+turnover penalties, long-only caps, and group limits.
+
+\subsection{Pruning Summary}
+
+\begin{table*}[t]
+\centering
+\caption{Legacy ablation summary across the retained pruning suite. Universe A
+shows the stronger negative-control effect; Universe B is milder but still
+below the factor core.}
+\label{tab:ablation_summary}
+\begingroup\small
+\begin{tabular}{@{} l r r r r @{}}
+\toprule
+\textbf{Component} & \textbf{A Sharpe} & \textbf{A Calmar} & \textbf{B Sharpe} & \textbf{B Calmar} \\
+\midrule
+Factor-only benchmark       & 0.82 & 0.74 & 0.71 & 0.99 \\
+Allocator fixed weights     & 0.45 & 0.51 & 0.57 & 0.88 \\
+Alpha stack no RL           & 0.41 & 0.47 & 0.58 & 0.90 \\
+Portfolio RL (fixed alpha)  & 0.36 & 0.49 & 0.44 & 0.77 \\
+Full pipeline               & 0.29 & 0.43 & 0.45 & 0.77 \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table*}
+
+\begin{table}[t]
+\centering
+\caption{Rolling-window robustness summary for the full pipeline.}
+\label{tab:robustness_summary}
+\begingroup\small
+\begin{tabular}{@{} >{\raggedright\arraybackslash}p{0.70\columnwidth} r @{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Rolling windows                                    & 6 \\
+Median full-pipeline Sharpe                        & 0.59 \\
+Median full-pipeline Calmar                        & 1.07 \\
+Median full-pipeline Max DD                        & $-$8.9\% \\
+Frac. windows full beats factor-only benchmark on drawdown & 67\% \\
+Frac. windows full beats factor-only benchmark on Calmar   & 17\% \\
+Frac. windows full beats SPY on Sharpe             & 17\% \\
+Frac. windows full beats SPY on Calmar             & 17\% \\
+\bottomrule
+\end{tabular}
+\endgroup
+\end{table}
+
+The message is consistent across both universes. The factor core remains
+stronger than the legacy full pipeline, with the gap larger in Universe A than
+in Universe B. Fixed alpha combination is also stronger than the fully learned
+branch, so additional learned layers beyond the factor core are hard to
+justify in this harness.
+
+\subsection{Legacy Significance Reference}
+
+\begin{table*}[t]
+\centering
+\caption{Block-bootstrap significance for the legacy full pipeline versus
+selected baselines (Sharpe deltas).}
+\label{tab:legacy_bootstrap_significance}
+\small
+\begin{tabular}{@{} p{0.42\textwidth} r r r @{}}
+\toprule
+\textbf{Comparison} & \textbf{Delta Sharpe} & \textbf{95\% CI} & \textbf{p-value} \\
+\midrule
+Full -- SPY                   & -0.16 & [-0.91, 0.51] & 0.615 \\
+Full -- Factor-only benchmark & -0.58 & [-1.14, -0.15] & 0.005 \\
+Full -- Vol-target            & -0.47 & [-0.98, -0.03] & 0.035 \\
+Full -- DD-Delever            & -0.50 & [-1.04, 0.06] & 0.070 \\
+Full -- E2E RL (PPO)          & -0.14 & [-1.19, 0.81] & 0.820 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+In the archived confidence-interval artifacts, the legacy full pipeline reaches
+about 9.0\% annualized return, 0.42 Sharpe, 0.46 Calmar, and $-$19.6\%
+maximum drawdown. The bootstrap summary shows that it is significantly worse
+than the factor-only benchmark on Sharpe and annualized return, significantly
+worse than vol-targeting on both dimensions, and not cleanly separated from
+SPY or end-to-end PPO on Sharpe. As a supplementary reference, it therefore
+confirms the same boundary result as the pruning table: the old learned branch
+does not recover the main economic claim.
+
+\subsection{Reward Sensitivity}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Reward-function ablation for the full pipeline on the revised bundle.}
+\label{tab:reward_ablation}
+\begin{tabular}{@{} l r r r r @{}}
+\toprule
+\textbf{Reward} & \textbf{Return} & \textbf{Sharpe} & \textbf{Max DD} & \textbf{Calmar} \\
+\midrule
+Differential Sharpe & 9.3\% & 0.45 & $-$17.0\% & 0.55 \\
+Return              & 9.5\% & 0.48 & $-$17.2\% & 0.55 \\
+Sortino             & 9.5\% & 0.48 & $-$17.0\% & 0.56 \\
+Mean-Variance       & 9.2\% & 0.45 & $-$17.8\% & 0.52 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Reward design moves the retained full-pipeline controller within a relatively
+narrow band, but it does not alter the broader ranking versus the factor core,
+simple rules, or the robust stack. The rolling-window and blocked time-series
+cross-validation diagnostics therefore remain useful as supplementary context,
+not as primary evidence for the paper's main claim.
+
+\section{Supplementary Figures}
 
 All result plots are collected in the appendix so the main body can remain
 table-driven and easier to scan. Universe A and Universe B are shown side by
@@ -1816,152 +1725,6 @@ controllers.}
 
 \clearpage
 \begin{thebibliography}{99}
-
-\bibitem{almgren2000}
-R. Almgren and N. Chriss.
-\newblock Optimal execution of portfolio transactions.
-\newblock \emph{Journal of Risk}, 3(2):5--39, 2000.
-
-\bibitem{buehler2019}
-H. Buehler, L. Gonon, J. Teichmann, and B. Wood.
-\newblock Deep hedging.
-\newblock \emph{Quantitative Finance}, 19(8):1271--1291, 2019.
-
-\bibitem{bollerslev1986}
-T. Bollerslev.
-\newblock Generalized autoregressive conditional heteroskedasticity.
-\newblock \emph{Journal of Econometrics}, 31(3):307--327, 1986.
-
-\bibitem{chen2021}
-L. Chen, M. Pelger, and J. Zhu.
-\newblock Deep learning in asset pricing.
-\newblock \emph{SSRN Working Paper 3350138}, revised 2021.
-
-\bibitem{cong2021}
-Y. Cong, B. Deng, X. Bao, and H. Dai.
-\newblock AlphaPortfolio: Direct construction through deep reinforcement learning
-  and interpretable representation learning.
-\newblock \emph{Proceedings of the AAAI Conference on Artificial Intelligence},
-  35(6):4831--4839, 2021.
-
-\bibitem{deng2017}
-Y. Deng, F. Bao, Y. Kong, Z. Ren, and Q. Dai.
-\newblock Deep direct reinforcement learning for financial signal representation
-  and trading.
-\newblock \emph{IEEE Transactions on Neural Networks and Learning Systems},
-  28(3):653--664, 2017.
-
-\bibitem{du2020}
-Y. Du, P. N. Kolm, A. Ritter, and T. Wang.
-\newblock Deep reinforcement learning for option replication and hedging.
-\newblock \emph{The Journal of Financial Data Science}, 2(4):44--59, 2020.
-
-\bibitem{engle1982}
-R. F. Engle.
-\newblock Autoregressive conditional heteroscedasticity with estimates of the
-  variance of United Kingdom inflation.
-\newblock \emph{Econometrica}, 50(4):987--1007, 1982.
-
-
-\bibitem{fama1993}
-E. F. Fama and K. R. French.
-\newblock Common risk factors in the returns on stocks and bonds.
-\newblock \emph{Journal of Financial Economics}, 33(1):3--56, 1993.
-
-\bibitem{giglio2022}
-S. Giglio, D. Xiu, and D. Zhang.
-\newblock Machine learning in asset pricing.
-\newblock \emph{Annual Review of Financial Economics}, 14:337--368, 2022.
-
-\bibitem{gu2020}
-S. Gu, B. Kelly, and D. Xiu.
-\newblock Empirical asset pricing via machine learning.
-\newblock \emph{Review of Financial Studies}, 33(5):2223--2273, 2020.
-
-\bibitem{hamilton1989}
-J. D. Hamilton.
-\newblock A new approach to the economic analysis of nonstationary time series
-  and the business cycle.
-\newblock \emph{Econometrica}, 57(2):357--384, 1989.
-
-\bibitem{jander2025}
-J. Jander, H. H. Li, M. Schmid, and T. Pohl.
-\newblock Reinforcement learning in finance: From current practice to standards
-  and benchmarks.
-\newblock \emph{SSRN Working Paper 5703882}, 2025.
-
-\bibitem{jegadeesh1993}
-N. Jegadeesh and S. Titman.
-\newblock Returns to buying winners and selling losers: implications for stock
-  market efficiency.
-\newblock \emph{Journal of Finance}, 48(1):65--91, 1993.
-
-\bibitem{jiang2017}
-Z. Jiang, D. Xu, and J. Liang.
-\newblock A deep reinforcement learning framework for the financial portfolio
-  management problem.
-\newblock \emph{arXiv preprint arXiv:1706.10059}, 2017.
-
-\bibitem{kolm2019}
-P. N. Kolm and G. Ritter.
-\newblock Modern perspectives on reinforcement learning in finance.
-\newblock \emph{SSRN Working Paper 3449401}, 2019.
-
-\bibitem{kolm2019hedge}
-P. N. Kolm and G. Ritter.
-\newblock Dynamic replication and hedging: A reinforcement learning approach.
-\newblock \emph{The Journal of Financial Data Science}, 1(4):159--171, 2019.
-
-\bibitem{moody2001}
-J. Moody and M. Saffell.
-\newblock Learning to trade via direct reinforcement.
-\newblock \emph{IEEE Transactions on Neural Networks}, 12(4):875--889, 2001.
-
-\bibitem{nevmyvaka2006}
-Y. Nevmyvaka, Y. Feng, and M. Kearns.
-\newblock Reinforcement learning for optimized trade execution.
-\newblock In \emph{Proceedings of the 23rd International Conference on Machine
-  Learning}, pages 673--680, 2006.
-
-\bibitem{pacheco2023}
-D. Pacheco Aznar.
-\newblock Portfolio management: A deep distributional reinforcement learning
-  approach.
-\newblock \emph{SSRN Working Paper 4522084}, 2023.
-
-
-\bibitem{schmeidler1989}
-D. Schmeidler.
-\newblock Subjective probability and expected utility without additivity.
-\newblock \emph{Econometrica}, 57(3):571--587, 1989.
-
-\bibitem{wang2000}
-S. S. Wang.
-\newblock A class of distortion operators for pricing financial and insurance risks.
-\newblock \emph{Journal of Risk and Insurance}, 67(1):15--36, 2000.
-
-\bibitem{yaari1987}
-M. E. Yaari.
-\newblock The dual theory of choice under risk.
-\newblock \emph{Econometrica}, 55(1):95--115, 1987.
-
-\bibitem{sun2023}
-S. Sun, M. Qin, W. Zhang, H. Xia, C. Zong, J. Ying, Y. Xie, L. Zhao,
-  X. Wang, and B. An.
-\newblock TradeMaster: A holistic quantitative trading platform empowered by
-  reinforcement learning.
-\newblock In \emph{Advances in Neural Information Processing Systems 36:
-  Datasets and Benchmarks Track}, 2023.
-
-\bibitem{sutton2018}
-R. S. Sutton and A. G. Barto.
-\newblock \emph{Reinforcement Learning: An Introduction}.
-\newblock MIT Press, Cambridge, MA, second edition, 2018.
-
-\bibitem{zhang2020}
-Z. Zhang, S. Zohren, and S. Roberts.
-\newblock Deep reinforcement learning for trading.
-\newblock \emph{The Journal of Financial Data Science}, 2(2):25--40, 2020.
 
 \bibitem{agrawal2013} % *** NEW ***
 S. Agrawal and N. Goyal.
