@@ -23,6 +23,7 @@ from quant_stack.evaluation import (
     _load_checkpoint_results,
     _write_run_manifest,
 )
+from quant_stack.checkpointing import _scope_universe_run_key, _universe_checkpoint_dir
 from quant_stack.execution import _apply_execution_constraints, _compute_transaction_cost
 
 
@@ -135,6 +136,14 @@ class CheckpointCompatibilityTests(unittest.TestCase):
             compatible = _load_checkpoint_results(checkpoint_path, expected_metadata, match_mode='compatible')
 
         self.assertIsNone(compatible)
+
+    def test_checkpoint_paths_scope_extended_universes(self) -> None:
+        base_dir = Path('/tmp/checkpoint-root')
+        scoped_dir = _universe_checkpoint_dir(base_dir, 'E')
+        scoped_key = _scope_universe_run_key('control_H_mpc_tf0.50', 'E')
+
+        self.assertEqual(scoped_dir, base_dir / 'universe_E')
+        self.assertEqual(scoped_key, 'universe_E_control_H_mpc_tf0.50')
 
 
 class RunManifestTests(unittest.TestCase):

@@ -280,11 +280,6 @@ LSTM_TICKERS_A_LIQUID = [
     'XOM', 'JNJ', 'PG', 'CAT', 'GLD',
 ]
 
-ASSET_GROUPS_A_LIQUID = {
-    group: [ticker for ticker in tickers if ticker in UNIVERSE_A_LIQUID]
-    for group, tickers in ASSET_GROUPS_EXPANDED.items()
-}
-
 # ---- Active universe (change this line to switch) ----
 UNIVERSE = UNIVERSE_EXPANDED
 
@@ -386,6 +381,11 @@ ASSET_GROUPS_EXPANDED = {
     'communications': ['META', 'DIS', 'CMCSA', 'VZ', 'T', 'NFLX'],
     'consumer_disc': ['AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'LOW', 'SBUX'],
     'diversifier': ['GLD', 'TLT', 'VNQ'],
+}
+
+ASSET_GROUPS_A_LIQUID = {
+    group: [ticker for ticker in tickers if ticker in UNIVERSE_A_LIQUID]
+    for group, tickers in ASSET_GROUPS_EXPANDED.items()
 }
 
 ASSET_GROUPS = (

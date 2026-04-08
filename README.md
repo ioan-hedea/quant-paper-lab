@@ -61,6 +61,7 @@ In short:
 - checkpoint-aware reruns (`checkpoints/research_runs/...`)
 - cross-universe transfer/meta-learning evaluation
 - paper-ready plots and table exports
+- universe-aware checkpoint smoke test: `python scripts/checkpoint_smoke.py --universes C D E`
 
 ## Quickstart
 
