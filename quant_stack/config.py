@@ -1028,6 +1028,7 @@ def use_universe(universe_id: str):
             results = run_full_pipeline(prices, volumes, returns, ...)
     """
     import importlib
+    import quant_stack.checkpointing as _checkpointing
     import quant_stack.config as _cfg
     import quant_stack.data as _data
     import quant_stack.pipeline as _pipeline
@@ -1052,6 +1053,11 @@ def use_universe(universe_id: str):
         'cfg_BENCHMARK_REBALANCE': getattr(_cfg, 'BENCHMARK_REBALANCE', None),
         'cfg_DATA_START': getattr(_cfg, 'DATA_START', None),
         'cfg_DATA_END': getattr(_cfg, 'DATA_END', None),
+        'checkpointing_BENCHMARK': getattr(_checkpointing, 'BENCHMARK', None),
+        'checkpointing_BENCHMARK_COMPONENTS': getattr(_checkpointing, 'BENCHMARK_COMPONENTS', None),
+        'checkpointing_BENCHMARK_REBALANCE': getattr(_checkpointing, 'BENCHMARK_REBALANCE', None),
+        'checkpointing_DATA_START': getattr(_checkpointing, 'DATA_START', None),
+        'checkpointing_DATA_END': getattr(_checkpointing, 'DATA_END', None),
         'data_UNIVERSE': _data.UNIVERSE,
         'data_BENCHMARK': _data.BENCHMARK,
         'data_BENCHMARK_COMPONENTS': getattr(_data, 'BENCHMARK_COMPONENTS', None),
@@ -1078,6 +1084,11 @@ def use_universe(universe_id: str):
         _cfg.BENCHMARK_REBALANCE = profile.benchmark_rebalance
         _cfg.DATA_START = profile.data_start
         _cfg.DATA_END = profile.data_end
+        _checkpointing.BENCHMARK = profile.benchmark_label
+        _checkpointing.BENCHMARK_COMPONENTS = tuple(profile.benchmark_components)
+        _checkpointing.BENCHMARK_REBALANCE = profile.benchmark_rebalance
+        _checkpointing.DATA_START = profile.data_start
+        _checkpointing.DATA_END = profile.data_end
 
         # Patch downstream modules that imported at module level
         _data.UNIVERSE = profile.tickers
@@ -1106,6 +1117,11 @@ def use_universe(universe_id: str):
         _cfg.BENCHMARK_REBALANCE = saved['cfg_BENCHMARK_REBALANCE']
         _cfg.DATA_START = saved['cfg_DATA_START']
         _cfg.DATA_END = saved['cfg_DATA_END']
+        _checkpointing.BENCHMARK = saved['checkpointing_BENCHMARK']
+        _checkpointing.BENCHMARK_COMPONENTS = saved['checkpointing_BENCHMARK_COMPONENTS']
+        _checkpointing.BENCHMARK_REBALANCE = saved['checkpointing_BENCHMARK_REBALANCE']
+        _checkpointing.DATA_START = saved['checkpointing_DATA_START']
+        _checkpointing.DATA_END = saved['checkpointing_DATA_END']
         _data.UNIVERSE = saved['data_UNIVERSE']
         _data.BENCHMARK = saved['data_BENCHMARK']
         _data.BENCHMARK_COMPONENTS = saved['data_BENCHMARK_COMPONENTS']
