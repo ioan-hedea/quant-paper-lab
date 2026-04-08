@@ -91,7 +91,7 @@ def _canonical_control_config(control_cfg: dict[str, object]) -> dict[str, objec
             'mpc_alpha_decay', 'mpc_stress_reversion', 'mpc_min_invested',
             'mpc_max_stabilizer', 'mpc_risk_penalty', 'mpc_turnover_penalty',
             'mpc_drawdown_penalty', 'mpc_stress_penalty', 'mpc_terminal_penalty',
-            'mpc_max_daily_change',
+            'mpc_max_daily_change', 'mpc_joint_convexity', 'mpc_convexity_tail_scale',
         ),
         'adaptive_allocator': (
             'adaptive_allocator_min_invested', 'adaptive_allocator_param_smoothing',

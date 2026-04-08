@@ -393,10 +393,13 @@ class MPCController(BaseController):
         self.stress_penalty = float(config.mpc_stress_penalty)
         self.terminal_penalty = float(config.mpc_terminal_penalty)
         self.max_daily_change = float(config.mpc_max_daily_change)
+        self.joint_convexity = bool(getattr(config, 'mpc_joint_convexity', False)) and self.convexity_enabled
+        self.convexity_tail_scale = float(getattr(config, 'mpc_convexity_tail_scale', 1.65))
         self._plan_start_t = -999
         self._plan: list[tuple[float, float]] = []
         self._plan_source = 'none'
         self._last_plan_objective = 0.0
+        self._selected_convexity_mode = 0
 
     def uses_direct_weights(self) -> bool:
         return True
@@ -433,7 +436,19 @@ class MPCController(BaseController):
         core = core / (core_sum + 1e-8)
         return float(invested_fraction) * core
 
-    def _plan_controls(self, alpha_book: pd.Series, stabilizer_book: pd.Series, alpha_view: pd.Series, cov: np.ndarray, prev_book: pd.Series, state: ControlState) -> tuple[list[tuple[float, float]], str, float]:
+    def _convexity_stage_value(self, expected_ret: float, risk: float, stress_scale: float, mode: int) -> float:
+        carry, lam = self._convexity_mode_params(mode)
+        if carry <= 0.0 and lam <= 0.0:
+            return 0.0
+        tail_std = float(np.sqrt(max(risk, 0.0)))
+        protected_shortfall = max(
+            0.0,
+            self.convexity_threshold - (float(expected_ret) - self.convexity_tail_scale * stress_scale * tail_std),
+        )
+        benefit = float(lam * protected_shortfall ** 2)
+        return float(benefit - carry)
+
+    def _plan_controls(self, alpha_book: pd.Series, stabilizer_book: pd.Series, alpha_view: pd.Series, cov: np.ndarray, prev_book: pd.Series, state: ControlState) -> tuple[list[tuple[float, float]], int, str, float]:
         from scipy.optimize import minimize as sp_minimize
         horizon = self.horizon
         alpha_vec = alpha_view.reindex(alpha_book.index).fillna(0.0).to_numpy(dtype=float)
@@ -458,7 +473,7 @@ class MPCController(BaseController):
         bounds.extend([(self.min_invested, 1.0)] * (horizon - 1))
         bounds.extend([(0.0, self.max_stabilizer)] * horizon)
 
-        def objective(params: np.ndarray) -> float:
+        def objective(params: np.ndarray, mode: int) -> float:
             invest_seq = np.clip(params[:horizon], self.min_invested, 1.0)
             mix_seq = np.clip(params[horizon:], 0.0, self.max_stabilizer)
             total = 0.0
@@ -486,23 +501,47 @@ class MPCController(BaseController):
                     - 0.5 * self.stress_penalty * smooth
                     - exposure_penalty
                 )
+                if self.joint_convexity:
+                    stage_value += self._convexity_stage_value(expected_ret, risk, stress_scale, mode)
                 total -= float((self.discount ** h) * stage_value)
                 prev = weights
             terminal_target = self._compose_book(alpha_base, stabilizer_base, float(invest_seq[-1]), float(mix_seq[-1])).to_numpy(dtype=float)
             total += self.terminal_penalty * float(np.sum((prev - terminal_target) ** 2))
             return float(total)
 
+        candidate_modes = (0, 1, 2) if self.joint_convexity else (0,)
+        best_plan: list[tuple[float, float]] | None = None
+        best_mode = 0
+        best_source = 'heuristic'
+        best_objective = float('inf')
+
         try:
-            result = sp_minimize(objective, x0=x0, method='SLSQP', bounds=bounds, options={'maxiter': 120, 'ftol': 1e-7})
-            if result.success:
+            for mode in candidate_modes:
+                result = sp_minimize(
+                    lambda params, selected_mode=mode: objective(params, selected_mode),
+                    x0=x0,
+                    method='SLSQP',
+                    bounds=bounds,
+                    options={'maxiter': 120, 'ftol': 1e-7},
+                )
+                candidate_objective = float(result.fun) if np.isfinite(result.fun) else float('inf')
+                if not result.success or candidate_objective >= best_objective:
+                    continue
                 invest_seq = np.clip(result.x[:horizon], self.min_invested, 1.0)
                 mix_seq = np.clip(result.x[horizon:], 0.0, self.max_stabilizer)
-                plan = [(float(b), float(s)) for b, s in zip(invest_seq, mix_seq)]
-                return plan, 'optimized', float(result.fun)
+                best_plan = [(float(b), float(s)) for b, s in zip(invest_seq, mix_seq)]
+                best_mode = int(mode)
+                best_source = 'optimized'
+                best_objective = candidate_objective
         except Exception:
             pass
+
+        if best_plan is not None:
+            return best_plan, best_mode, best_source, best_objective
+
         fallback_plan = [(invested0, stabilizer0) for _ in range(horizon)]
-        return fallback_plan, 'heuristic', float(objective(x0))
+        fallback_mode = self._heuristic_convexity_mode(state) if self.joint_convexity else 0
+        return fallback_plan, int(fallback_mode), 'heuristic', float(objective(x0, int(fallback_mode)))
 
     def build_target_weights(self, allocator, factor_scores, alpha_scores, confidence, recent_returns, prev_weights, optimizer_config, state: ControlState) -> pd.Series | None:
         tickers = factor_scores.index
@@ -520,14 +559,22 @@ class MPCController(BaseController):
         if recent_returns is None or len(recent_returns) < 40:
             invested, stabilizer_mix = self._initial_controls(state)
             weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
-            self._latest_diagnostics.update({
+            fallback_mode = self._heuristic_convexity_mode(state) if self.joint_convexity else 0
+            self._selected_convexity_mode = int(fallback_mode)
+            diagnostics = {
                 'mpc_invested_target': invested,
                 'mpc_stabilizer_mix': stabilizer_mix,
                 'mpc_plan_step': 0,
                 'mpc_plan_source': 'heuristic',
                 'mpc_plan_objective': 0.0,
                 'overlay_size': stabilizer_mix,
-            })
+            }
+            if self.joint_convexity:
+                diagnostics.update({
+                    'convexity_mode_selected': int(fallback_mode),
+                    'convexity_mode_source': 'mpc_joint_fallback',
+                })
+            self._latest_diagnostics.update(diagnostics)
             return weights
         aligned_returns = recent_returns.reindex(columns=tickers).fillna(0.0)
         try:
@@ -535,14 +582,22 @@ class MPCController(BaseController):
         except Exception:
             invested, stabilizer_mix = self._initial_controls(state)
             weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
-            self._latest_diagnostics.update({
+            fallback_mode = self._heuristic_convexity_mode(state) if self.joint_convexity else 0
+            self._selected_convexity_mode = int(fallback_mode)
+            diagnostics = {
                 'mpc_invested_target': invested,
                 'mpc_stabilizer_mix': stabilizer_mix,
                 'mpc_plan_step': 0,
                 'mpc_plan_source': 'fallback_cov',
                 'mpc_plan_objective': 0.0,
                 'overlay_size': stabilizer_mix,
-            })
+            }
+            if self.joint_convexity:
+                diagnostics.update({
+                    'convexity_mode_selected': int(fallback_mode),
+                    'convexity_mode_source': 'mpc_joint_fallback',
+                })
+            self._latest_diagnostics.update(diagnostics)
             return weights
         alpha_view = (alpha_scores * confidence).reindex(tickers).fillna(0.0)
         alpha_scale = float(alpha_view.abs().quantile(0.90))
@@ -554,19 +609,27 @@ class MPCController(BaseController):
         prev_book = prev_weights.reindex(tickers).fillna(0.0) if prev_weights is not None else alpha_book * state.invested_fraction
         needs_replan = (not self._plan or state.t - self._plan_start_t >= self.replan_every or state.t - self._plan_start_t >= len(self._plan))
         if needs_replan:
-            self._plan, self._plan_source, self._last_plan_objective = self._plan_controls(alpha_book, stabilizer_book, alpha_view, cov, prev_book, state)
+            self._plan, self._selected_convexity_mode, self._plan_source, self._last_plan_objective = self._plan_controls(
+                alpha_book, stabilizer_book, alpha_view, cov, prev_book, state,
+            )
             self._plan_start_t = state.t
         plan_step = int(np.clip(state.t - self._plan_start_t, 0, len(self._plan) - 1))
         invested, stabilizer_mix = self._plan[plan_step]
         weights = self._compose_book(alpha_book, stabilizer_book, invested, stabilizer_mix)
-        self._latest_diagnostics.update({
+        diagnostics = {
             'mpc_invested_target': float(invested),
             'mpc_stabilizer_mix': float(stabilizer_mix),
             'mpc_plan_step': int(plan_step),
             'mpc_plan_source': self._plan_source,
             'mpc_plan_objective': float(self._last_plan_objective),
             'overlay_size': float(stabilizer_mix),
-        })
+        }
+        if self.joint_convexity:
+            diagnostics.update({
+                'convexity_mode_selected': int(self._selected_convexity_mode),
+                'convexity_mode_source': 'mpc_joint',
+            })
+        self._latest_diagnostics.update(diagnostics)
         return weights
 
     def reset(self) -> None:
@@ -574,6 +637,7 @@ class MPCController(BaseController):
         self._plan = []
         self._plan_source = 'none'
         self._last_plan_objective = 0.0
+        self._selected_convexity_mode = 0
 
 
 class AdaptiveAllocatorController(BaseController):

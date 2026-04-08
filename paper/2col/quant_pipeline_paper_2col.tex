@@ -42,20 +42,20 @@
 \maketitle
 \begin{abstract}
 Which controller adds the most value once a finance-first alpha engine is
-already in place? This paper studies that question through a risk-shaping
-operator framework that classifies portfolio controllers by how they alter the
-induced return distribution, either through tail-aware outcome selection,
-payoff transformation, or mixtures of policies. The empirical setting is a
-modular factor/GARCH/HMM alpha engine with an explicit constrained allocator
-and a frozen-bundle evaluation comparing 19 controllers across two disjoint
-equity universes. Across both universes, the robust family defines the
-frontier. Convexity-enhanced CVaR is strongest when left-tail asymmetry is
-pronounced, while plain CVaR is the more portable robust baseline. Learning
-helps materially when used as meta-control over structured experts, but not as
-the primary control layer. The contribution is therefore a reproducible
-framework for comparing portfolio controllers under shared alpha, timing, and
-cost assumptions, together with evidence that explicit risk shaping dominates
-the learned alternatives tested here.
+already in place? Existing work offers many controller families, but rarely
+compares them under shared alpha, timing, cost, and data assumptions, making
+it difficult to separate forecasting quality from control quality. This paper
+introduces a frozen-bundle evaluation protocol, meaning a pre-committed
+artifact in which hyperparameters, splits, and cost assumptions are locked
+before controller results are examined, together with a risk-shaping operator
+framework that interprets control as acting on outcome distributions through
+selection operators, outcome operators, or both; empirically, the protocol
+compares 19 controllers on top of the same factor/GARCH/HMM alpha engine and
+constrained allocator across two disjoint equity universes. Across both
+universes, the robust family defines the frontier: convexity-enhanced CVaR is
+strongest when left-tail asymmetry is pronounced, plain CVaR is the more
+portable robust baseline, and learning helps mainly as meta-control over
+structured experts rather than as the primary control layer.
 \end{abstract}
 
 \medskip
@@ -73,7 +73,10 @@ policy is added. The practical question is therefore not only how to forecast
 returns, but which controller class adds the most value once a finance-first
 alpha engine is already in place. Fixed exposure, simple rules, contextual
 bandits, supervised controllers, robust optimization, meta-control, predictive
-control, and RL are all plausible answers to that question.
+control, and RL are all plausible answers to that question. Viewed abstractly,
+these controllers can be treated as operators on induced outcome
+distributions: they may change which actions are selected, how outcomes are
+transformed, or both.
 
 \subsection{Research Questions}
 
@@ -93,7 +96,8 @@ The paper makes three contributions.
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
 \item A risk-shaping operator framework that classifies controllers by how they
       reshape the induced return distribution through selection operators,
-      outcome operators, or mixtures of policies.
+      outcome operators, or mixtures of policies, and that suggests a broader
+      view of constrained control as acting on outcome distributions.
 \item A modular pipeline that combines a finance-first alpha engine with an
       explicit constrained allocator, separating alpha generation, portfolio
       construction, and control.
@@ -107,7 +111,10 @@ leaderboard. It is that portfolio control can be analyzed as risk shaping under
 shared alpha, timing, and cost assumptions. Within that lens, the dominant
 design combines tail-aware selection through CVaR with payoff transformation
 through convex protection, while learning contributes most as meta-control
-rather than as the primary decision layer.
+rather than as the primary decision layer. Portfolio management is the concrete
+test bed here, but the underlying claim is broader: admissible controllers can
+be understood as operators that reshape outcome distributions under
+uncertainty.
 
 \paragraph{Paper roadmap.}
 Section~2 positions the paper against the main portfolio-management traditions
@@ -163,7 +170,9 @@ signal, size positions, and adapt sequentially. The difficulty is that
 financial returns are noisy, nonstationary, and data-poor relative to many
 other machine-learning domains. As a result, end-to-end RL systems can be
 sample-inefficient, regime-sensitive, and hard to interpret when they fail
-\cite{gu2020,kolm2019,jander2025}.
+\cite{gu2020,kolm2019,jander2025}. Recent applied work continues to study how
+agent architecture, rebalancing frequency, and signal design change
+portfolio-RL behavior in realistic market settings \cite{ayari2025}.
 
 \textbf{Neural return forecasting with a separate optimizer.} A second line of
 work uses deep or other machine-learning models to estimate returns, factors, or
@@ -460,6 +469,204 @@ concentration limits. This intermediate layer is not only an architectural
 convenience; it reflects the practical fact that many real portfolio systems
 mediate between forecast signals and final positions through a constrained
 allocator.
+\subsection{Receding-Horizon Alpha--Allocator--Controller Formulation}
+
+To make the modular stack precise, it is useful to write the
+alpha--allocator--controller pipeline as a discrete-time receding-horizon
+system. Let $x_t \in \mathcal{X}$ denote the controller state, let
+$u_t \in \mathcal{U}$ denote a trade or exposure-control action, and let
+$\xi_t \in \Xi$ denote exogenous market disturbances. The state aggregates the
+current book, cash, latent risk factors, regime beliefs, and any compact
+summaries required by downstream control. The system evolves according to
+\[
+x_{t+1} = f(x_t, u_t, \xi_t).
+\]
+
+The alpha layer maps observations $o_t$ into predictive objects
+\[
+z_t = \mathcal{A}_{\theta}(o_t) = (\alpha_t, \Sigma_t, s_t),
+\]
+where $\alpha_t$ is the expected-return vector, $\Sigma_t$ is a risk estimate,
+and $s_t$ is a latent or filtered regime state. The allocator then turns those
+predictive objects into a reference portfolio
+\[
+w_t^{\mathrm{ref}} = \mathcal{G}(z_t).
+\]
+In the present architecture, $w_t^{\mathrm{ref}}$ is the constrained allocator
+book anchored to $w_t^{\text{target}}$. Over a planning horizon $H$, the same
+mapping can be viewed as generating a reference trajectory
+\[
+\mathbf{w}_t^{\mathrm{ref}} =
+\left(
+w_{t|t}^{\mathrm{ref}},
+w_{t+1|t}^{\mathrm{ref}},
+\dots,
+w_{t+H|t}^{\mathrm{ref}}
+\right).
+\]
+
+Given the current state $x_t$ and the reference trajectory
+$\mathbf{w}_t^{\mathrm{ref}}$, the predictive controller solves
+\[
+\begin{aligned}
+\min_{\{u_{t+i|t}\}_{i=0}^{H-1}} \quad &
+\sum_{i=0}^{H-1}
+\ell(x_{t+i|t}, u_{t+i|t}; w_{t+i|t}^{\mathrm{ref}}, z_{t+i|t}) \\
+&+ \ell_f(x_{t+H|t}) \\
+\text{s.t.} \quad &
+x_{t+i+1|t} = f(x_{t+i|t}, u_{t+i|t}, \xi_{t+i|t}), \\
+& x_{t+i|t} \in \mathcal{X}, \quad u_{t+i|t} \in \mathcal{U}, \\
+& x_{t|t} = x_t, \quad x_{t+H|t} \in \mathcal{X}_f.
+\end{aligned}
+\]
+Only the first action is executed,
+\[
+u_t = u_{t|t}^{\star},
+\]
+and the optimization is repeated at the next step. This makes the alpha layer
+the forecast generator, the allocator the reference generator, and the control
+layer the constrained tracking-and-risk-shaping mechanism.
+
+A convenient stage-cost decomposition is
+\[
+\begin{aligned}
+\ell(x,u; w^{\mathrm{ref}}, z)
+&=
+\ell_{\mathrm{track}}(x; w^{\mathrm{ref}})
++ \ell_{\mathrm{trade}}(u) \\
+&\quad
++ \ell_{\mathrm{risk}}(x,u; z)
++ \ell_{\mathrm{reg}}(x,u),
+\end{aligned}
+\]
+with representative choices
+\[
+\ell_{\mathrm{track}}(x; w^{\mathrm{ref}})
+=
+\lVert h(x) - w^{\mathrm{ref}} \rVert_Q^2,
+\]
+\[
+\ell_{\mathrm{trade}}(u)
+=
+u^\top R u
+\quad \text{or} \quad
+\lambda_{\mathrm{to}} \lVert u \rVert_1,
+\]
+and
+\[
+\ell_{\mathrm{risk}}(x,u; z)
+=
+\lambda_{\mathrm{risk}} \rho(x,u; z),
+\]
+where $h(x)$ extracts portfolio weights from the state and $\rho$ may encode
+volatility, CVaR, drawdown, or regime-dependent penalties. For implementation,
+a local linearization
+\[
+x_{t+1} = A_t x_t + B_t u_t + c_t
+\]
+yields a structured quadratic or convex program whose coefficients depend on
+the current forecast bundle and regime state.
+
+In the minimal self-financing tracking case, the state is only the weight
+vector $w_t \in \mathbb{R}^N$ and the dynamics reduce to
+\[
+w_{t+1} = w_t + u_t.
+\]
+The corresponding MPC problem becomes
+\[
+\begin{aligned}
+\min_{\{u_{t+i|t}\}_{i=0}^{H-1}} \quad &
+\sum_{i=0}^{H-1}
+\lVert w_{t+i|t} - w_{t+i|t}^{\mathrm{ref}} \rVert_Q^2 \\
+&+ \sum_{i=0}^{H-1}
+u_{t+i|t}^\top R u_{t+i|t} \\
+&+ \lambda \sum_{i=0}^{H-1}
+\rho(w_{t+i|t}, u_{t+i|t}) \\
+&+ \lVert w_{t+H|t} - w_{t+H|t}^{\mathrm{ref}} \rVert_P^2 \\
+\text{s.t.} \quad &
+w_{t+i+1|t} = w_{t+i|t} + u_{t+i|t}, \\
+& \mathbf{1}^\top w_{t+i|t} = 1, \\
+& w_{t+i|t} \in \mathcal{W}, \quad u_{t+i|t} \in \mathcal{U}.
+\end{aligned}
+\]
+
+When the forecasting module is learned, it simply parameterizes the control
+problem through $z_t = \Phi_{\theta}(o_t)$. The executed action can then be
+written compactly as
+\[
+u_t^{\star} = \Psi_H(x_t, \Phi_{\theta}(o_t)),
+\]
+where $\Phi_{\theta}$ denotes the learned forecasting-and-allocation map and
+$\Psi_H$ denotes the horizon-$H$ constrained optimizer. Candidate H in the
+frozen-bundle is the most direct instantiation of this receding-horizon view,
+while the other controllers can be interpreted as simpler or more heavily
+parameterized special cases of the same alpha--allocator--controller stack.
+
+\paragraph{Connection to operator framework.}
+The receding-horizon formulation defines the selection operator
+$\mathcal{Q}_{\pi}$ through constrained optimization over action sequences.
+Specifically, the optimizer $\Psi_H$ induces a mapping from the reference
+distribution generated by the alpha--allocator pipeline to a controlled
+distribution via sequential action selection. Additional layers, such as
+convexity-aware payoff shaping, introduce outcome operators
+$\mathcal{T}_{\pi}$ acting on realized returns. Together, these yield the
+factorization
+\[
+F_t^\pi = (\mathcal{T}_{\pi}\circ\mathcal{Q}_{\pi})(F_t^{(0)}),
+\]
+linking the mechanistic control formulation to the distributional
+risk-shaping perspective.
+
+\paragraph{Definition (risk-shaping MPC controller).}
+An MPC controller is \emph{risk-shaping} if its receding-horizon objective or
+constraints are specified in terms of downside-distribution control rather than
+tracking alone. Concretely, given forecasts $z_t$ and reference weights
+$w_{t:t+H|t}^{\mathrm{ref}}$, a risk-shaping MPC selects
+\[
+u_t^\star \in \arg\min_{\mathbf{u}_{t:t+H-1|t}}
+\sum_{i=0}^{H-1}
+\ell_{\mathrm{track}}
+\;+\;
+\ell_{\mathrm{trade}}
+\;+\;
+\ell_{\mathrm{risk}}
+\;+\;
+\ell_{\mathrm{reg}}
+\]
+subject to portfolio dynamics and admissibility constraints, where
+$\ell_{\mathrm{risk}}$ or the constraint set explicitly encodes a downside
+functional such as volatility, drawdown, stress loss, or CVaR. In operator
+language, such a controller implements a structured selection operator
+$\mathcal{Q}_{\pi}^{\mathrm{MPC}}$ on the induced return distribution. If it
+is further combined with an explicit payoff-shaping layer, it becomes a
+composed risk-shaping controller
+$\mathcal{S}_{\pi}^{\mathrm{RSMPC}}
+= \mathcal{T}_{\pi}\circ\mathcal{Q}_{\pi}^{\mathrm{MPC}}$.
+The archived H controller is therefore a \emph{selection-only} risk-shaping
+MPC: it plans over future allocations with turnover, stabilizer, and
+stress-aware penalties, but it does not by itself add a nontrivial outcome
+operator.
+
+A minimal practical extension upgrades this to a discrete
+\emph{risk-shaping MPC} by choosing a convexity mode jointly with the control
+plan. Writing
+\[
+T_m(r)=r-c_m+\lambda_m(\tau-r)_+^2,
+\qquad m_t \in \{0,1,2\},
+\]
+the controller may execute
+\[
+(u_t^\star, m_t^\star)
+\in
+\arg\min_{u_t,m_t}\;
+\mathbb{E}\!\left[
+\ell(x_t,u_t;w_t^{\mathrm{ref}},z_t)
++ \rho\!\left(T_{m_t}(Q(u_t))\right)
+\right].
+\]
+This is the smallest implementation that turns a selection-only MPC into a
+composed controller with an explicit outcome operator selected inside the
+planning loop.
 
 \subsection{Control Methods}
 
@@ -478,10 +685,11 @@ the same finance-first alpha engine and constrained allocator.
 \item \textbf{Robust optimization.} A CVaR-aware robust allocator augments the
       constrained optimizer with downside-sensitive risk control and is the
       main non-learning advanced comparator.
-\item \textbf{Predictive control.} A model-predictive controller (MPC)
-      performs receding-horizon exposure planning with explicit turnover,
-      stress, and stabilizer penalties, providing a structured control-theory
-      comparator.
+\item \textbf{Predictive control.} A risk-shaping model-predictive controller
+      (MPC) performs receding-horizon exposure planning with explicit turnover,
+      stress, and stabilizer penalties, providing a structured
+      control-theory comparator and a concrete selection-operator
+      instantiation of the framework.
 \item \textbf{RL comparators.} Tabular portfolio Q-learning remains as a direct
       learned-controller baseline, and end-to-end PPO is retained as a
       monolithic comparator outside the main control-comparison suite.
@@ -518,7 +726,50 @@ F_t^\pi
 Here $\mathcal{Q}_\pi$ is a \emph{selection operator} that changes portfolio
 weights, scenario weights, or exposure levels, and $\mathcal{T}_\pi$ is an
 \emph{outcome operator} that reshapes realized payoffs after a portfolio has
-been selected. The controller search problem is therefore
+been selected.
+
+\paragraph{Operator view of control.}
+The representation
+\[
+F_t^\pi = (\mathcal{T}_\pi \circ \mathcal{Q}_\pi)(F_t^{(0)})
+\]
+admits a broader interpretation: any admissible controller can be viewed as an
+operator acting on a reference outcome distribution. The selection operator
+$\mathcal{Q}_\pi$ modifies the distribution through constrained action
+selection, while the outcome operator $\mathcal{T}_\pi$ modifies realized
+payoffs. This decomposition is not specific to portfolio management. It applies
+more broadly to sequential decision systems in which actions induce
+distributions over outcomes and control modifies either the selection of
+actions or the transformation of outcomes.
+
+\paragraph{Framework Proposition (operator decomposition of control policies).}
+Consider a decision system in which a baseline mechanism induces an outcome
+distribution $F^{(0)}$, and a controller $\pi$ modifies admissible actions
+subject to constraints. Under mild measurability conditions, the induced
+outcome distribution can be written as
+\[
+F^\pi = (\mathcal{T}_\pi \circ \mathcal{Q}_\pi)(F^{(0)}),
+\]
+where $\mathcal{Q}_\pi$ is a selection operator induced by constrained action
+choice and $\mathcal{T}_\pi$ is an outcome transformation operator acting on
+realized outcomes. In particular, optimization-based controllers correspond to
+structured selection operators, learning-based controllers approximate such
+operators from data, and payoff-shaping mechanisms introduce nontrivial
+outcome operators.
+
+\paragraph{Framework prediction.}
+The operator framework is falsifiable rather than merely taxonomic. It predicts
+that nontrivial outcome operators should add value only when the
+selection-optimized reference distribution still retains pronounced residual
+left-tail mass. In the current study we test that prediction across two
+disjoint universes with different released tail profiles. Using the
+control-comparison factor-only benchmark as a proxy for the reference book,
+Universe A has mean daily 5\% VaR about $-1.19\%$ and mean maximum drawdown
+about $-19.5\%$, versus about $-1.15\%$ and $-12.0\%$ in Universe B across the
+same train-fraction grid. The framework therefore predicts a larger role for
+convexity-aware payoff shaping in Universe A than in Universe B.
+
+The controller search problem is therefore
 \[
 \begin{aligned}
 \pi^\star
@@ -535,7 +786,25 @@ $\mathcal{T}_\pi$; the council learns a mixture operator over expert policies;
 and the winning controller can be written compactly as
 $\mathcal{S}_{D+}=\mathcal{T}_{\text{convex}}\circ\mathcal{Q}_{\text{CVaR}}$.
 
-This operator lens also connects the controller comparison to classical distortion-risk ideas. Dual-theory and distorted-expectation views interpret risk control as transforming probabilities or outcomes rather than only changing point forecasts \cite{yaari1987,schmeidler1989,wang2000}. In that language, CVaR is a coherent left-tail distortion applied during portfolio selection, while the convexity layer is a discrete outcome distortion applied to realized returns. The framework therefore does more than label winners: it classifies controllers by how they reshape the induced return distribution.
+This operator lens also connects the controller comparison to classical
+distortion-risk ideas. Dual-theory and distorted-expectation views interpret
+risk control as transforming probabilities or outcomes rather than only
+changing point forecasts \cite{yaari1987,schmeidler1989,wang2000}. In that
+language, CVaR is a coherent left-tail distortion applied during portfolio
+selection, while the convexity layer is a discrete outcome distortion applied
+to realized returns. The framework therefore does more than label winners: it
+classifies controllers by how they reshape the induced return distribution.
+
+The relationship to the distortion-risk literature is therefore substantive
+rather than cosmetic. Yaari's dual theory and Wang-type distortion operators
+emphasize that decision quality can be changed by distorting probabilities or
+outcomes instead of only changing point forecasts \cite{yaari1987,wang2000}. In
+the present finite-horizon control setting, $\mathcal{Q}_{\pi}$ plays the role
+of an action-induced distributional distortion generated by constrained
+selection, while $\mathcal{T}_{\pi}$ captures explicit outcome reshaping after
+selection. The contribution here is to move that logic into a modular control
+pipeline in which optimization, learning, and payoff shaping can be compared in
+operator form under shared information and cost assumptions.
 
 The key empirical result is therefore not only that the robust family wins, but
 that its strongest variants compose two different risk-shaping operations. Most
@@ -562,6 +831,10 @@ Meta-control & Mixture of policies with adaptive expert weights \\
 \end{center}
 
 \subsection{Theoretical Grounding}
+
+Proposition~1 instantiates this framework by characterizing when a specific
+outcome operator $\mathcal{T}_{\pi}$, namely the convexity layer, improves
+tail risk relative to the identity operator.
 
 \paragraph{Proposition 1 (tail-shaping improvement under mild regularity).}
 Let $R$ be a one-step portfolio return with continuous distribution supported on
@@ -604,6 +877,38 @@ assumption (i) implies $2\lambda_m(\tau-r_{\min})\approx 0.90<1$ and is
 satisfied in the reported sample. The key implication is operational rather
 than cosmetic: performance improvements arise not from better prediction, but
 from improved shaping of the return distribution's left tail.
+
+\paragraph{Proposition 2 (selection-only limitation under residual tail gap).}
+Let $\mathfrak{Q}$ denote the admissible class of selection operators and
+assume there exists
+\[
+Q^\star \in \arg\min_{Q \in \mathfrak{Q}}
+\operatorname{CVaR}_\alpha(-Q(F^{(0)})).
+\]
+Suppose further that the selected distribution $Q^\star(F^{(0)})$ still has
+positive mass in a protected tail region where the payoff transformation
+$g_m(r)=r-c(m)+\lambda_m(\tau-r)_+^2$ satisfies the conditions of
+Proposition~1 with $\delta_\alpha(m)>0$. Then for every selection-only
+controller $Q \in \mathfrak{Q}$,
+\[
+\operatorname{CVaR}_\alpha(-Q(F^{(0)}))
+\ge
+\operatorname{CVaR}_\alpha(-g_m(Q^\star(F^{(0)}))) + \delta_\alpha(m).
+\]
+In particular, once the selection-optimal distribution still contains residual
+protected-tail mass, no admissible selection-only controller can match the
+left-tail improvement delivered by the composed controller
+$\mathcal{T}_{\text{convex}}\circ Q^\star$.
+
+\emph{Proof sketch.} By definition of $Q^\star$,
+$\operatorname{CVaR}_\alpha(-Q(F^{(0)})) \ge
+\operatorname{CVaR}_\alpha(-Q^\star(F^{(0)}))$ for every
+$Q \in \mathfrak{Q}$. Proposition~1 gives
+$\operatorname{CVaR}_\alpha(-g_m(Q^\star(F^{(0)}))) \le
+\operatorname{CVaR}_\alpha(-Q^\star(F^{(0)}))-\delta_\alpha(m)$.
+Combining the two inequalities yields the claim. The proposition therefore
+formalizes the residual-tail case in which a pure selection operator is
+insufficient and an outcome operator is required for additional improvement.
 
 \subsection{CVaR-Robust Controller}
 
@@ -774,7 +1079,9 @@ macro-lag settings, four reward settings, and five blocked time-series CV
 folds. Reported claims are tied to the archived CSV and figure artifacts
 released with the codebase, manuscript, and bundle layout in the public
 repository \url{https://github.com/ioan-hedea/quant-paper-lab}. Exact bundle
-paths are listed in the appendix.
+paths are listed in the appendix. Throughout the paper, a \emph{frozen-bundle}
+means a pre-committed evaluation artifact in which hyperparameters, splits, and
+cost assumptions are locked before controller results are examined.
 
 Within that archived suite, action ladders, optimizer settings, reward choices,
 and comparison baselines are held fixed across ablations, split-fraction tests,
@@ -797,6 +1104,17 @@ extensions, an optional convexity mode can then apply a stylized carry cost and
 left-tail payoff shaping term before the final realized portfolio return is
 recorded. That realized return is finally used to update the value table or
 policy state when the controller is learned.
+
+\paragraph{Reproducibility statement.}
+The main empirical claims are directly tied to released bundle artifacts.
+Table~\ref{tab:metrics} is reproduced from
+\texttt{research\_control\_comparison.csv},
+Table~\ref{tab:robust_significance} from
+\texttt{research\_control\_significance.csv}, and the appendix tables and
+figures from the correspondingly named CSV and PNG files listed in Appendix
+A.2. Reproducing the paper therefore requires only the public repository, the
+two released universe bundles, and the pinned timing, cost, and split settings
+stored with each bundle.
 
 \subsection{Benchmark Logic}
 
@@ -852,6 +1170,15 @@ do not displace the robust frontier. Third, learning helps most when used as
 meta-control over structured experts; learning-first controllers do not
 dominate the shared alpha engine.
 
+\paragraph{How to read the bootstrap evidence.}
+The block-bootstrap intervals summarize uncertainty in Sharpe differences within
+the archived reference split, not certainty about every future market. A
+non-decisive interval should therefore be read as ``the current sample does not
+separate these leaders cleanly'', not as proof that the methods are equivalent.
+This matters most in Universe B, where the leading methods cluster tightly and
+the honest interpretation is that a longer sample or additional universes would
+be needed to separate them with more statistical confidence.
+
 \begin{table}[t]
 \centering
 \footnotesize
@@ -889,7 +1216,9 @@ train/test split settings used in the frozen-bundle.
 All methods share the same finance-first alpha engine and constrained allocator.
 Universe A is the original 77-ticker bundle; Universe B is the zero-overlap
 75-ticker bundle. Full 19-method rankings remain in the archived CSVs.
-Annualized figures.}
+Annualized figures. The unusually strong Universe-A return for plain D reflects
+scenario-based reweighting inside the CVaR optimizer rather than a separate
+alpha source.}
 \label{tab:metrics}
 \begin{tabular}{@{} l r r r r r r @{}}
 \toprule
@@ -995,7 +1324,10 @@ meta-controllers reduces drawdown modestly but gives back Sharpe, so the
 evidence favors learned gating over learned payoff shaping. LinUCB remains the
 best non-meta learner, CMDP-Lagrangian improves materially in Universe B, and
 tabular Q-learning becomes respectable in Universe B without becoming a frontier
-method.
+method. The cleaner interpretation is that gate complexity is not the
+bottleneck: the simpler council beats the MLP gate because both remain
+selection-only operators, whereas the leading controller composes selection
+with payoff shaping.
 
 Read as best-in-class representatives, the finished comparison is internally
 coherent. Universe A's best simple rule is A4, while Universe B's is A1. B1 is
@@ -1059,7 +1391,11 @@ split is much tighter: differences versus \texttt{D+}, the council, MPC, and
 SPY are not statistically decisive on Sharpe. This Universe-A versus
 Universe-B distinction is one of the paper's central findings: robust risk
 shaping dominates both universes, but the extra convexity layer is strongly
-supported only where left-tail asymmetry is pronounced.
+supported only where left-tail asymmetry is pronounced. Resolving the tighter
+Universe-B cluster likely requires either a longer out-of-sample history,
+additional zero-overlap universes, or more regime-diverse evaluation windows,
+because the present sample does not contain enough separation to distinguish
+the leading methods statistically.
 
 The strongest practical insight from the new extensions is now conditional.
 Convexity-aware payoff shaping directly addresses the earlier CVaR caveat in
@@ -1242,7 +1578,10 @@ than to the best risk-shaping methods. That pattern suggests that, for daily
 portfolio rebalancing under noisy observations, directly encoding downside
 structure is more reliable than trying to learn it from the realized return
 stream. In other words, learning is most useful here as meta-control, not as
-primary control.
+primary control. The council's edge over the MLP gate shows that gate
+complexity is not the limiting factor. The deeper limitation is structural:
+both controllers remain selection-only operators, whereas the best-performing
+stack combines selection with an explicit outcome operator.
 
 \paragraph{Mechanism diagnostic.}
 Appendix Figure~\ref{fig:taildiagnostic} gives the cleanest direct evidence for
@@ -1267,6 +1606,14 @@ squeezing out every last point estimate, regime-aware rules are the strongest
 practical baseline. They improve drawdown materially, remain easy to explain,
 and do not require the extra tuning burden associated with bandits or RL.
 
+\paragraph{MPC as the defensive frontier.}
+If the binding objective is drawdown minimization rather than maximal Sharpe,
+H\_mpc is the clearest answer in the bundle. In Universe B it reaches a
+$-3.9\%$ maximum drawdown at 0.64 Sharpe, the shallowest drawdown profile in
+the entire comparison by a wide margin, and in Universe A it still limits
+drawdown to $-6.7\%$. The practical takeaway is therefore two-part: D or D+
+for the risk-adjusted-return frontier, H\_mpc for the defensive frontier.
+
 The learning-based methods are still useful as research instruments, but not as
 the default recommendation from this bundle. The MLP meta-controller suggests
 that lightweight learned meta-selection can be genuinely competitive, yet it
@@ -1275,6 +1622,14 @@ practical contribution is therefore not ``always use learning.'' It is to
 compare structured rules, learning, robust optimization, and payoff-shaping
 extensions over a shared alpha engine before accepting additional controller
 complexity.
+
+\paragraph{Generalization beyond finance.}
+The operator-based view of control extends beyond portfolio management. In
+general sequential decision systems, one may distinguish between mechanisms
+that modify action selection under constraints and those that reshape outcome
+distributions after selection. This suggests a broader perspective in which
+control, planning, and learning methods can be unified through the operators
+they induce on outcome distributions.
 
 \section{Threats to Validity}
 
@@ -1303,6 +1658,14 @@ historical sample per universe. The right interpretation is therefore
 comparative and conditional within this evaluation rather than universal. The
 most valuable next steps are broader universes, stricter point-in-time data,
 and fuller multi-split significance analysis.
+
+\paragraph{Broader-impact note.}
+The study uses public market and macro data and is intended as methodological
+evidence rather than investment advice. Backtests remain vulnerable to
+survivorship effects, evolving market structure, and the gap between simulated
+and realized execution. For that reason, the paper frames its claims as
+comparative statements about controller design under shared assumptions, not as
+promises of deployable outperformance.
 
 \section{Conclusion}
 
@@ -1366,25 +1729,32 @@ writes the artifacts below into
 \texttt{results/20260330\_221820\_universe\_A/} and
 \texttt{results/20260331\_002747\_universe\_B/}:
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt, topsep=4pt]
-\item \texttt{research\_metrics.csv}: tabular output for ablation and robustness runs;
-\item \texttt{research\_control\_comparison.csv}: split-aggregated controller comparison across the 19 evaluated methods;
-\item \texttt{research\_ablation\_summary.csv}: split-aggregated ablation summaries;
-\item \texttt{research\_robustness\_summary.csv}: rolling-window medians and benchmark beat fractions;
-\item \texttt{research\_regime\_summary.csv}: regime-conditioned action, turnover, and return summaries;
-\item \texttt{research\_rolling\_references.csv}: rolling benchmark metrics for SPY and the factor-only benchmark;
-\item \texttt{research\_bootstrap\_cis.csv}: block-bootstrap confidence intervals for key strategy metrics;
-\item \texttt{research\_bootstrap\_significance.csv}: legacy-full-pipeline bootstrap deltas versus benchmark strategies;
-\item \texttt{research\_control\_significance.csv}: complete reference-split robust-winner-versus-controller bootstrap deltas, including SPY;
-\item \texttt{research\_jobson\_korkie.csv}: parametric Sharpe-ratio comparison tests;
-\item \texttt{research\_ts\_cv.csv}: blocked time-series cross-validation summaries;
-\item \texttt{research\_summary.json}: serialized configuration and best-per-suite summaries;
-\item \texttt{control\_method\_overview.png}: main paper figure summarizing controller ranking, trade-offs, and split stability;
-\item \texttt{control\_pareto\_frontier.png}: Pareto-frontier view of return versus drawdown;
-\item \texttt{control\_interpretability.png}: MLP gate and convexity activation diagnostic figure;
-\item \texttt{control\_mpc\_diagnostic.png}: invested-target and stabilizer-mix diagnostic for MPC;
-\item \texttt{control\_tail\_diagnostic.png}: left-tail diagnostic comparing factor-only, plain D, and D+;
-\item \texttt{pipeline\_rolling\_windows.png}: appendix-only rolling-window diagnostic for the legacy branch; and
-\item \texttt{pipeline\_reward\_ablation.png}: reward-ablation figure.
+\item Tabular summaries:
+      \texttt{research\_metrics.csv},
+      \texttt{research\_control\_comparison.csv},
+      \texttt{research\_ablation\_summary.csv}, and
+      \texttt{research\_robustness\_summary.csv}.
+\item Regime and benchmark diagnostics:
+      \texttt{research\_regime\_summary.csv} and
+      \texttt{research\_rolling\_references.csv}.
+\item Significance and test artifacts:
+      \texttt{research\_bootstrap\_cis.csv},
+      \texttt{research\_bootstrap\_significance.csv},
+      \texttt{research\_control\_significance.csv},
+      \texttt{research\_jobson\_korkie.csv}, and
+      \texttt{research\_ts\_cv.csv}.
+\item Bundle metadata:
+      \texttt{research\_summary.json}.
+\item Main comparison figures:
+      \texttt{control\_method\_overview.png},
+      \texttt{control\_pareto\_frontier.png}, and
+      \texttt{control\_interpretability.png}.
+\item Tail and controller diagnostics:
+      \texttt{control\_mpc\_diagnostic.png} and
+      \texttt{control\_tail\_diagnostic.png}.
+\item Legacy supplementary figures:
+      \texttt{pipeline\_rolling\_windows.png} and
+      \texttt{pipeline\_reward\_ablation.png}.
 \end{enumerate}
 
 
@@ -1585,7 +1955,9 @@ Right: Universe B, where the robust frontier is tighter and plain
 \end{minipage}
 \caption{Split-stability heatmaps for the control-comparison suite in the two
 universes. These plots summarize how controller rankings change across the
-three train-fraction splits.}
+three train-fraction splits. The takeaway is that Universe A has a clearer
+robust hierarchy, whereas Universe B exhibits a tighter cluster among the
+leading robust, council, and MPC methods.}
 \label{fig:split_heatmaps}
 \end{figure*}
 }{}
@@ -1624,7 +1996,9 @@ near the defensive frontier.}
 \caption{Interpretability diagnostics for the reference split in both
 universes. The left panel in each image shows how the learned gate reallocates
 weight across experts through time; the right panel shows convexity mode usage
-by regime.}
+by regime. The takeaway is that the learned gates mostly reallocate around a
+CVaR-heavy core rather than replacing robust control with a distinct learned
+policy.}
 \label{fig:interpretability}
 \end{figure*}
 }{}
@@ -1766,6 +2140,16 @@ E. Altman.
 P. Artzner, F. Delbaen, J.-M. Eber, and D. Heath.
 \newblock Coherent measures of risk.
 \newblock \emph{Mathematical Finance}, 9(3):203--228, 1999.
+
+% ============================================================================
+% RECENT RL FOR PORTFOLIO MANAGEMENT
+% ============================================================================
+
+\bibitem{ayari2025}
+R. Ayari.
+\newblock Feature configuration effects in DRL portfolio management: A
+  risk-focused evaluation under market stress.
+\newblock \emph{Quantitative Finance}, 26(1):119--136, 2026.
 
 % ============================================================================
 % VOLATILITY MODELS

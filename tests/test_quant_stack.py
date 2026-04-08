@@ -164,6 +164,83 @@ class PortfolioConstructionTests(unittest.TestCase):
         self.assertLessEqual(float(weights.max()), 0.2450001)
 
 
+class ControllerOverlayTests(unittest.TestCase):
+    def test_plain_mpc_convexity_overlay_stays_heuristic(self) -> None:
+        ctrl = build_controller(ControlConfig(method='mpc', convexity_enabled=True))
+        state = ControlState(
+            alpha_strength=0.4,
+            recent_drawdown=-0.08,
+            recent_vol=0.22,
+            regime_belief=0.35,
+            trend=-0.02,
+            concentration=0.12,
+            invested_fraction=0.90,
+            t=120,
+        )
+
+        _, diagnostics = ctrl.apply_return_overlay(-0.02, state)
+
+        self.assertEqual(diagnostics['convexity_mode_source'], 'heuristic')
+        self.assertIn(diagnostics['convexity_mode'], (1, 2))
+
+    def test_joint_mpc_convexity_mode_propagates_to_overlay(self) -> None:
+        class DummyAllocator:
+            def optimize_target_book(self, factor_scores, alpha_scores, confidence, recent_returns, prev_weights, control_state):
+                book = (0.6 * factor_scores.clip(lower=0.0) + 0.4 * alpha_scores.clip(lower=0.0)).clip(lower=0.0)
+                return book / (float(book.sum()) + 1e-8)
+
+            def estimate_min_var_core(self, tickers, recent_returns, confidence):
+                return pd.Series(1.0 / len(tickers), index=tickers)
+
+        ctrl = build_controller(ControlConfig(
+            method='mpc',
+            convexity_enabled=True,
+            mpc_joint_convexity=True,
+        ))
+        tickers = ["AAPL", "MSFT", "GLD"]
+        factor_scores = pd.Series([1.0, 0.8, 0.2], index=tickers)
+        alpha_scores = pd.Series([0.03, 0.015, -0.005], index=tickers)
+        confidence = pd.Series([1.0, 0.9, 0.8], index=tickers)
+        recent_returns = pd.DataFrame(
+            np.random.default_rng(7).normal(-0.0008, 0.018, size=(90, len(tickers))),
+            columns=tickers,
+        )
+        prev_weights = pd.Series([0.35, 0.30, 0.20], index=tickers)
+        state = ControlState(
+            alpha_strength=0.6,
+            recent_drawdown=-0.12,
+            recent_vol=0.28,
+            regime_belief=0.22,
+            trend=-0.05,
+            concentration=0.16,
+            invested_fraction=0.92,
+            t=180,
+        )
+
+        weights = ctrl.build_target_weights(
+            DummyAllocator(),
+            factor_scores,
+            alpha_scores,
+            confidence,
+            recent_returns,
+            prev_weights,
+            None,
+            state,
+        )
+        diagnostics = ctrl.current_diagnostics()
+        _, overlay_diagnostics = ctrl.apply_return_overlay(-0.03, state)
+
+        self.assertIsNotNone(weights)
+        self.assertIn('convexity_mode_selected', diagnostics)
+        self.assertEqual(diagnostics['convexity_mode_source'], 'mpc_joint')
+        self.assertIn(int(diagnostics['convexity_mode_selected']), (0, 1, 2))
+        self.assertEqual(
+            int(overlay_diagnostics['convexity_mode']),
+            int(diagnostics['convexity_mode_selected']),
+        )
+        self.assertEqual(overlay_diagnostics['convexity_mode_source'], 'mpc_joint')
+
+
 class EvaluationTests(unittest.TestCase):
     def test_ablation_suite_labels_are_unique_and_stable(self) -> None:
         configs = build_ablation_suite(PipelineConfig())

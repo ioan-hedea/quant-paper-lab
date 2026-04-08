@@ -156,10 +156,143 @@ ASSET_GROUPS_B = {
     'diversifier': ['SLV', 'IEF', 'HYG'],
 }
 
+# ---- Universe C: European equities (zero overlap with A/B) ----
+UNIVERSE_C = list(dict.fromkeys([
+    'ADS.DE', 'ALV.DE', 'ASML.AS', 'INGA.AS', 'SAP.DE', 'SIE.DE', 'DTE.DE', 'IFX.DE',
+    'MUV2.DE', 'RWE.DE', 'BMW.DE', 'MBG.DE', 'VOW3.DE', 'BAS.DE', 'BAYN.DE', 'DHL.DE',
+    'BEI.DE', 'AIR.PA', 'AI.PA', 'BNP.PA', 'CAP.PA', 'CS.PA', 'DG.PA', 'ENGI.PA',
+    'MC.PA', 'OR.PA', 'RI.PA', 'SAN.PA', 'SU.PA', 'TTE.PA', 'VIE.PA', 'AZN.L',
+    'BARC.L', 'BATS.L', 'BP.L', 'DGE.L', 'GSK.L', 'HSBA.L', 'LSEG.L', 'NG.L',
+    'PRU.L', 'REL.L', 'RIO.L', 'SHEL.L', 'ULVR.L', 'VOD.L', 'BBVA.MC', 'IBE.MC',
+    'ITX.MC', 'REP.MC', 'SAN.MC', 'ENEL.MI', 'ENI.MI', 'ISP.MI', 'STLAM.MI',
+    'UCG.MI', 'ABBN.SW', 'ALC.SW', 'NESN.SW', 'NOVN.SW', 'ROG.SW', 'UBSG.SW',
+    'ZURN.SW', 'EWG', 'EWU', 'EWQ', 'EWI', 'EWP',
+]))
+
+PAIRS_CANDIDATES_C = [
+    ('ASML.AS', 'SAP.DE'), ('INGA.AS', 'ABBN.SW'), ('ALV.DE', 'MUV2.DE'),
+    ('BMW.DE', 'MBG.DE'), ('VOW3.DE', 'STLAM.MI'), ('AIR.PA', 'VIE.PA'),
+    ('MC.PA', 'OR.PA'), ('SAN.PA', 'NOVN.SW'), ('GSK.L', 'AZN.L'),
+    ('BP.L', 'SHEL.L'), ('ENEL.MI', 'IBE.MC'), ('BBVA.MC', 'SAN.MC'),
+    ('BNP.PA', 'CS.PA'), ('REL.L', 'LSEG.L'), ('EWG', 'EWQ'),
+]
+
+LSTM_TICKERS_C = [
+    'ASML.AS', 'SAP.DE', 'SIE.DE', 'AIR.PA', 'MC.PA',
+    'AZN.L', 'SHEL.L', 'HSBA.L', 'BBVA.MC', 'ENEL.MI',
+    'NESN.SW', 'NOVN.SW', 'UBSG.SW', 'EWG', 'EWU',
+]
+
+ASSET_GROUPS_C = {
+    'technology': ['ASML.AS', 'SAP.DE', 'SIE.DE', 'IFX.DE', 'CAP.PA', 'DTE.DE', 'PRX.AS', 'ADS.DE'],
+    'financials': ['ALV.DE', 'MUV2.DE', 'INGA.AS', 'HSBA.L', 'BARC.L', 'BNP.PA', 'CS.PA', 'BBVA.MC', 'SAN.MC', 'UCG.MI', 'ISP.MI', 'UBSG.SW', 'ZURN.SW'],
+    'healthcare': ['AZN.L', 'GSK.L', 'SAN.PA', 'NOVN.SW', 'ROG.SW', 'ALC.SW', 'BAYN.DE'],
+    'consumer': ['MC.PA', 'OR.PA', 'RI.PA', 'ULVR.L', 'DGE.L', 'BATS.L', 'ITX.MC', 'NESN.SW', 'BEI.DE', 'BMW.DE', 'MBG.DE', 'VOW3.DE'],
+    'industrials': ['AIR.PA', 'AI.PA', 'DHL.DE', 'VIE.PA', 'REL.L', 'LSEG.L', 'RWE.DE', 'ENGI.PA'],
+    'energy': ['BP.L', 'SHEL.L', 'TTE.PA', 'ENI.MI', 'REP.MC', 'NG.L', 'IBE.MC', 'ENEL.MI'],
+    'diversifier': ['EWG', 'EWU', 'EWQ', 'EWI', 'EWP'],
+}
+
+# ---- Universe D: Emerging markets (zero overlap with A/B/C/E) ----
+UNIVERSE_D = list(dict.fromkeys([
+    '0700.HK', '9988.HK', '3690.HK', '9618.HK', '9888.HK', '1810.HK', '1211.HK',
+    '0941.HK', '1299.HK', '2318.HK', '1398.HK', '3988.HK', '0939.HK', '0883.HK',
+    '2628.HK', 'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS',
+    'SBIN.NS', 'BHARTIARTL.NS', 'LT.NS', 'ITC.NS', 'HINDUNILVR.NS', 'AXISBANK.NS',
+    'KOTAKBANK.NS', 'MARUTI.NS', 'SUNPHARMA.NS', 'BAJFINANCE.NS', '2330.TW',
+    '2317.TW', '2454.TW', '2308.TW', '2881.TW', '2882.TW', '005930.KS', '000660.KS',
+    '035420.KS', '051910.KS', 'VALE3.SA', 'PETR4.SA', 'ITUB4.SA', 'BBDC4.SA',
+    'B3SA3.SA', 'ABEV3.SA', 'WEGE3.SA', 'WALMEX.MX', 'AMXB.MX', 'NPN.JO',
+    'CFR.JO', 'SOL.JO', 'HDB', 'IBN', 'PBR', 'NU', 'MELI',
+]))
+
+PAIRS_CANDIDATES_D = [
+    ('0700.HK', '9988.HK'), ('3690.HK', '9618.HK'), ('1398.HK', '0939.HK'),
+    ('RELIANCE.NS', 'TCS.NS'), ('HDFCBANK.NS', 'ICICIBANK.NS'),
+    ('AXISBANK.NS', 'KOTAKBANK.NS'), ('2330.TW', '2317.TW'),
+    ('005930.KS', '000660.KS'), ('VALE3.SA', 'PETR4.SA'),
+    ('ITUB4.SA', 'BBDC4.SA'), ('WALMEX.MX', 'AMXB.MX'),
+    ('HDB', 'IBN'), ('PBR', 'PETR4.SA'), ('NPN.JO', 'CFR.JO'),
+]
+
+LSTM_TICKERS_D = [
+    '0700.HK', '9988.HK', 'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS',
+    '2330.TW', '005930.KS', 'VALE3.SA', 'PETR4.SA', 'ITUB4.SA',
+    'WALMEX.MX', 'NPN.JO', 'HDB', 'IBN', 'MELI',
+]
+
+ASSET_GROUPS_D = {
+    'greater_china': ['0700.HK', '9988.HK', '3690.HK', '9618.HK', '9888.HK', '1810.HK', '1211.HK', '0941.HK', '1299.HK', '2318.HK', '1398.HK', '3988.HK', '0939.HK', '0883.HK', '2628.HK'],
+    'india': ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'SBIN.NS', 'BHARTIARTL.NS', 'LT.NS', 'ITC.NS', 'HINDUNILVR.NS', 'AXISBANK.NS', 'KOTAKBANK.NS', 'MARUTI.NS', 'SUNPHARMA.NS', 'BAJFINANCE.NS', 'HDB', 'IBN'],
+    'north_asia': ['2330.TW', '2317.TW', '2454.TW', '2308.TW', '2881.TW', '2882.TW', '005930.KS', '000660.KS', '035420.KS', '051910.KS'],
+    'latin_america': ['VALE3.SA', 'PETR4.SA', 'ITUB4.SA', 'BBDC4.SA', 'B3SA3.SA', 'ABEV3.SA', 'WEGE3.SA', 'WALMEX.MX', 'AMXB.MX', 'PBR', 'NU', 'MELI'],
+    'emea': ['NPN.JO', 'CFR.JO', 'SOL.JO'],
+}
+
+# ---- Universe E: multi-asset stress test ----
+UNIVERSE_E = list(dict.fromkeys([
+    'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLU', 'XLRE', 'XLP', 'XLY', 'XLB', 'XLC',
+    'TLT', 'IEF', 'SHY', 'HYG', 'LQD', 'EMB', 'AGG', 'TIP', 'BIL',
+    'GLD', 'SLV', 'USO', 'DBA', 'PDBC', 'CPER', 'UNG', 'CORN', 'WEAT',
+    'VNQ', 'SCHH', 'VNQI', 'REM',
+    'EFA', 'EWJ', 'FXI', 'EWZ', 'EWC', 'EWA', 'INDA', 'EWT', 'EIDO', 'EWS',
+    'VIXY', 'UUP', 'FXE', 'FXY',
+]))
+
+PAIRS_CANDIDATES_E = [
+    ('XLK', 'XLF'), ('XLV', 'XLI'), ('TLT', 'IEF'), ('HYG', 'LQD'),
+    ('GLD', 'SLV'), ('USO', 'DBA'), ('VNQ', 'SCHH'), ('EFA', 'EWJ'),
+    ('FXI', 'EWZ'), ('UUP', 'FXE'),
+]
+
+LSTM_TICKERS_E = [
+    'XLK', 'XLF', 'TLT', 'IEF', 'HYG',
+    'GLD', 'USO', 'VNQ', 'EFA', 'FXI',
+    'EWZ', 'VIXY', 'UUP', 'FXE', 'INDA',
+]
+
+ASSET_GROUPS_E = {
+    'us_sector_equity': ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLU', 'XLRE', 'XLP', 'XLY', 'XLB', 'XLC'],
+    'fixed_income': ['TLT', 'IEF', 'SHY', 'HYG', 'LQD', 'EMB', 'AGG', 'TIP', 'BIL'],
+    'commodities': ['GLD', 'SLV', 'USO', 'DBA', 'PDBC', 'CPER', 'UNG', 'CORN', 'WEAT'],
+    'real_assets': ['VNQ', 'SCHH', 'VNQI', 'REM'],
+    'international_equity': ['EFA', 'EWJ', 'FXI', 'EWZ', 'EWC', 'EWA', 'INDA', 'EWT', 'EIDO', 'EWS'],
+    'hedges_fx': ['VIXY', 'UUP', 'FXE', 'FXY'],
+}
+
+# ---- Universe A-Liquid: weekly robustness slice ----
+UNIVERSE_A_LIQUID = [
+    'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AMD', 'AVGO', 'AMZN', 'META',
+    'JPM', 'BAC', 'WFC', 'GS', 'XOM', 'CVX', 'COP', 'SLB',
+    'JNJ', 'UNH', 'PFE', 'ABBV', 'PG', 'KO', 'PEP', 'WMT', 'COST',
+    'CAT', 'HON', 'UNP', 'UPS', 'GE', 'HD', 'MCD', 'NKE', 'DIS',
+    'CMCSA', 'GLD', 'TLT', 'VNQ', 'XLU', 'TSLA',
+]
+
+PAIRS_CANDIDATES_A_LIQUID = [
+    ('AAPL', 'MSFT'), ('GOOGL', 'META'), ('NVDA', 'AMD'), ('JPM', 'GS'),
+    ('BAC', 'WFC'), ('XOM', 'CVX'), ('COP', 'SLB'), ('JNJ', 'PFE'),
+    ('PG', 'KO'), ('WMT', 'COST'), ('CAT', 'HON'), ('GLD', 'TLT'),
+]
+
+LSTM_TICKERS_A_LIQUID = [
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'JPM',
+    'XOM', 'JNJ', 'PG', 'CAT', 'GLD',
+]
+
+ASSET_GROUPS_A_LIQUID = {
+    group: [ticker for ticker in tickers if ticker in UNIVERSE_A_LIQUID]
+    for group, tickers in ASSET_GROUPS_EXPANDED.items()
+}
+
 # ---- Active universe (change this line to switch) ----
 UNIVERSE = UNIVERSE_EXPANDED
 
 BENCHMARK = 'SPY'
+BENCHMARK_COMPONENTS: tuple[tuple[str, float], ...] = (('SPY', 1.0),)
+BENCHMARK_REBALANCE = 'buyhold'
+DATA_START = '2013-04-01'
+DATA_END = '2026-04-01'
 
 # ---- Pairs candidates ----
 PAIRS_CANDIDATES_CORE = [
@@ -209,7 +342,7 @@ LSTM_TICKERS = (
 )
 
 # ---- Backtest window ----
-DATA_PERIOD = '13y'  # 2013–2026: taper tantrum, Brexit, COVID, inflation shock
+DATA_PERIOD = '13y'  # Legacy fallback when explicit start/end dates are absent
 
 RISK_FREE_RATE = 0.035
 
@@ -502,6 +635,8 @@ class ControlConfig:
     mpc_terminal_penalty: float = 0.75
     mpc_max_daily_change: float = 0.18
     mpc_objective_version: int = 2
+    mpc_joint_convexity: bool = False
+    mpc_convexity_tail_scale: float = 1.65
     # Legacy decision-aware allocator controller (kept for backwards compatibility;
     # the active architecture now applies these rules directly inside the allocator)
     adaptive_allocator_min_invested: float = 0.60
@@ -592,6 +727,7 @@ class ControlConfig:
             _validate_non_negative(name, getattr(self, name))
         _validate_unit_interval('mpc_max_daily_change', self.mpc_max_daily_change)
         _validate_int_min('mpc_objective_version', self.mpc_objective_version, 1)
+        _validate_non_negative('mpc_convexity_tail_scale', self.mpc_convexity_tail_scale)
         _validate_unit_interval('adaptive_allocator_min_invested', self.adaptive_allocator_min_invested)
         _validate_half_open_unit_interval('adaptive_allocator_param_smoothing', self.adaptive_allocator_param_smoothing)
         for name in (

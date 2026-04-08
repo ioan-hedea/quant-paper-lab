@@ -143,33 +143,48 @@ class BaseController:
     ) -> pd.Series | None:
         return None
 
+    def _heuristic_convexity_mode(self, state: ControlState) -> int:
+        if not self.convexity_enabled:
+            return 0
+        if (
+            state.recent_drawdown <= self.convexity_strong_drawdown
+            or state.recent_vol >= self.convexity_strong_vol
+            or state.regime_belief <= self.convexity_strong_regime
+        ):
+            return 2
+        if (
+            state.recent_drawdown <= self.convexity_mild_drawdown
+            or state.recent_vol >= self.convexity_mild_vol
+            or state.regime_belief <= self.convexity_mild_regime
+        ):
+            return 1
+        return 0
+
+    def _convexity_mode_params(self, mode: int) -> tuple[float, float]:
+        idx = int(np.clip(mode, 0, min(len(self.convexity_mode_carries), len(self.convexity_mode_lambdas)) - 1))
+        carry = float(self.convexity_mode_carries[idx])
+        lam = float(self.convexity_mode_lambdas[idx])
+        return carry, lam
+
     def apply_return_overlay(
         self,
         portfolio_ret: float,
         state: ControlState,
     ) -> tuple[float, dict[str, object]]:
-        mode = 0
-        if self.convexity_enabled:
-            if (
-                state.recent_drawdown <= self.convexity_strong_drawdown
-                or state.recent_vol >= self.convexity_strong_vol
-                or state.regime_belief <= self.convexity_strong_regime
-            ):
-                mode = 2
-            elif (
-                state.recent_drawdown <= self.convexity_mild_drawdown
-                or state.recent_vol >= self.convexity_mild_vol
-                or state.regime_belief <= self.convexity_mild_regime
-            ):
-                mode = 1
+        if 'convexity_mode_selected' in self._latest_diagnostics:
+            mode = int(np.clip(self._latest_diagnostics.get('convexity_mode_selected', 0), 0, 2))
+            mode_source = str(self._latest_diagnostics.get('convexity_mode_source', 'controller'))
+        else:
+            mode = self._heuristic_convexity_mode(state)
+            mode_source = 'heuristic' if self.convexity_enabled else 'disabled'
 
-        carry = float(self.convexity_mode_carries[min(mode, len(self.convexity_mode_carries) - 1)])
-        lam = float(self.convexity_mode_lambdas[min(mode, len(self.convexity_mode_lambdas) - 1)])
+        carry, lam = self._convexity_mode_params(mode)
         benefit = float(lam * max(0.0, self.convexity_threshold - float(portfolio_ret)) ** 2)
         adjusted_ret = float(portfolio_ret - carry + benefit)
         diagnostics = {
             'convexity_mode': mode,
             'convexity_mode_name': ('none', 'mild', 'strong')[mode],
+            'convexity_mode_source': mode_source,
             'convexity_carry': carry,
             'convexity_benefit': benefit,
             'convexity_net_adjustment': benefit - carry,
