@@ -12,7 +12,15 @@ from .alpha import (
     GARCHForecaster,
     HMMRegimeDetector,
 )
-from .config import BENCHMARK, ControlConfig, PipelineConfig, RISK_FREE_RATE, UNIVERSE
+from .config import (
+    BENCHMARK,
+    BENCHMARK_COMPONENTS,
+    BENCHMARK_REBALANCE,
+    ControlConfig,
+    PipelineConfig,
+    RISK_FREE_RATE,
+    UNIVERSE,
+)
 from .controllers import (
     BaseController,
     CouncilController,
@@ -67,6 +75,50 @@ def _compute_portfolio_reward(
     return float((portfolio_ret - recent_portfolio_rets.mean()) / (recent_portfolio_rets.std() + 1e-8))
 
 
+def _initialize_benchmark_state(
+    returns: pd.DataFrame,
+) -> tuple[list[tuple[str, float]], dict[str, float]]:
+    components = [
+        (ticker, float(weight))
+        for ticker, weight in BENCHMARK_COMPONENTS
+        if ticker in returns.columns and float(weight) > 0.0
+    ]
+    if not components:
+        raise RuntimeError(
+            f"No benchmark components for {BENCHMARK!r} are available in the returns frame."
+        )
+    total_weight = sum(weight for _, weight in components)
+    normalized = [(ticker, weight / total_weight) for ticker, weight in components]
+    current_weights = {ticker: weight for ticker, weight in normalized}
+    return normalized, current_weights
+
+
+def _benchmark_step_return(
+    returns: pd.DataFrame,
+    t: int,
+    dates: pd.Index,
+    target_components: list[tuple[str, float]],
+    current_weights: dict[str, float],
+) -> tuple[float, dict[str, float]]:
+    if BENCHMARK_REBALANCE == 'monthly' and t > 0:
+        current_date = pd.Timestamp(dates[t])
+        prev_date = pd.Timestamp(dates[t - 1])
+        if current_date.month != prev_date.month or current_date.year != prev_date.year:
+            current_weights = {ticker: weight for ticker, weight in target_components}
+
+    bench_ret = 0.0
+    next_weights: dict[str, float] = {}
+    for ticker, _ in target_components:
+        ticker_ret = float(returns[ticker].iloc[t])
+        weight = float(current_weights.get(ticker, 0.0))
+        bench_ret += weight * ticker_ret
+        next_weights[ticker] = weight * (1.0 + ticker_ret)
+
+    denom = max(1.0 + float(bench_ret), 1e-8)
+    next_weights = {ticker: value / denom for ticker, value in next_weights.items()}
+    return float(bench_ret), next_weights
+
+
 def _resolve_control_mode(config: PipelineConfig) -> tuple[str, bool, bool]:
     """Determine which control path to use. Returns (method, use_new, use_legacy_rl)."""
     control_method = config.experiment.control_method
@@ -103,6 +155,7 @@ def run_full_pipeline(
     train_frac = config.train_frac
 
     tickers = [t for t in UNIVERSE if t in returns.columns]
+    benchmark_components, benchmark_weights = _initialize_benchmark_state(returns)
     dates = returns.index
     n = len(dates)
     train_end = int(n * train_frac)
@@ -194,6 +247,7 @@ def run_full_pipeline(
         'adaptive_allocator_max_weights': [],
         'cmdp_lambdas': [], 'cmdp_constraint_costs': [], 'cmdp_violations': [],
         'control_method': control_method,
+        'benchmark_label': BENCHMARK,
     }
 
     peak = 1.0
@@ -341,7 +395,9 @@ def run_full_pipeline(
 
         # --- Apply Portfolio ---
         daily_ret = returns[tickers].iloc[t]
-        spy_ret = returns[BENCHMARK].iloc[t]
+        spy_ret, benchmark_weights = _benchmark_step_return(
+            returns, t, dates, benchmark_components, benchmark_weights,
+        )
         prev_weight_series = None
         if results['portfolio_weights']:
             prev_weight_series = pd.Series(results['portfolio_weights'][-1], index=tickers)

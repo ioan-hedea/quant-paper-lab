@@ -28,7 +28,7 @@ try:
     from quant_stack.execution import _compute_transaction_cost
 except ModuleNotFoundError:
     from quant_stack.pipeline import _compute_transaction_cost
-from quant_stack.config import ControlConfig, EvaluationConfig, PipelineConfig
+from quant_stack.config import ControlConfig, EvaluationConfig, PipelineConfig, get_universe_profile, use_universe
 from quant_stack.controllers import build_controller, ControlState
 from quant_stack.rl import PortfolioConstructionRL
 
@@ -242,6 +242,35 @@ class ControllerOverlayTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_new_universe_profiles_expose_benchmarks_and_windows(self) -> None:
+        profile_c = get_universe_profile('C')
+        profile_d = get_universe_profile('D')
+        profile_e = get_universe_profile('E')
+        profile_liquid = get_universe_profile('A_LIQUID')
+
+        self.assertEqual(profile_c.benchmark_label, 'VGK')
+        self.assertEqual(profile_d.benchmark_label, 'EEM')
+        self.assertEqual(profile_e.benchmark_label, '60/40')
+        self.assertEqual(profile_e.benchmark_rebalance, 'monthly')
+        self.assertEqual(profile_liquid.rebalance_frequency, 'weekly')
+        self.assertGreater(len(profile_c.tickers), 60)
+        self.assertGreater(len(profile_d.tickers), 50)
+        self.assertGreater(len(profile_e.tickers), 40)
+
+    def test_use_universe_swaps_benchmark_contract(self) -> None:
+        import quant_stack.config as cfg
+        import quant_stack.data as data
+        import quant_stack.pipeline as pipeline
+
+        original_benchmark = cfg.BENCHMARK
+        with use_universe('E') as profile:
+            self.assertEqual(profile.benchmark_label, '60/40')
+            self.assertEqual(cfg.BENCHMARK, '60/40')
+            self.assertEqual(data.BENCHMARK, '60/40')
+            self.assertEqual(pipeline.BENCHMARK, '60/40')
+            self.assertEqual(tuple(cfg.BENCHMARK_COMPONENTS), (('SPY', 0.60), ('TLT', 0.40)))
+        self.assertEqual(cfg.BENCHMARK, original_benchmark)
+
     def test_ablation_suite_labels_are_unique_and_stable(self) -> None:
         configs = build_ablation_suite(PipelineConfig())
         labels = [config.experiment.label for config in configs]

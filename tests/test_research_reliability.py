@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from quant_stack.config import EvaluationConfig, PipelineConfig
+from quant_stack.config import EvaluationConfig, PipelineConfig, use_universe
 from quant_stack.evaluation import (
     CHECKPOINT_SCHEMA_VERSION,
     _checkpoint_metadata,
@@ -99,6 +99,42 @@ class CheckpointCompatibilityTests(unittest.TestCase):
 
         self.assertIsNone(strict)
         self.assertEqual(compatible, {'wealth': [1.0, 1.1]})
+
+    def test_compatible_checkpoint_rejects_benchmark_contract_mismatch(self) -> None:
+        idx = pd.date_range('2025-01-01', periods=5, freq='B')
+        prices = pd.DataFrame({'AAPL': [100, 101, 102, 103, 104], 'SPY': [200, 201, 202, 203, 204], 'TLT': [90, 91, 91, 92, 93]}, index=idx)
+        volumes = pd.DataFrame({'AAPL': [10, 11, 12, 13, 14], 'SPY': [20, 20, 21, 22, 22], 'TLT': [30, 30, 31, 31, 32]}, index=idx)
+        returns = prices.pct_change().dropna()
+        cfg = PipelineConfig()
+        macro = pd.DataFrame(index=returns.index)
+        sec = pd.Series(dtype=float)
+
+        with use_universe('A'):
+            payload_metadata = _checkpoint_metadata(
+                prices, volumes, returns, macro, sec, cfg,
+                suite='control_comparison', include_e2e=False, run_key='control_H_mpc_tf0.50',
+            )
+        with use_universe('E'):
+            expected_metadata = _checkpoint_metadata(
+                prices, volumes, returns, macro, sec, cfg,
+                suite='control_comparison', include_e2e=False, run_key='control_H_mpc_tf0.50',
+            )
+
+        with TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / 'sample.pkl'
+            with checkpoint_path.open('wb') as handle:
+                pickle.dump(
+                    {
+                        'schema_version': CHECKPOINT_SCHEMA_VERSION,
+                        'metadata': payload_metadata,
+                        'results': {'wealth': [1.0, 1.1]},
+                    },
+                    handle,
+                )
+
+            compatible = _load_checkpoint_results(checkpoint_path, expected_metadata, match_mode='compatible')
+
+        self.assertIsNone(compatible)
 
 
 class RunManifestTests(unittest.TestCase):

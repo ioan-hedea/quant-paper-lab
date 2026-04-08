@@ -7,7 +7,13 @@ import copy
 import numpy as np
 import pandas as pd
 
-from .config import ControlConfig, ExperimentConfig, PipelineConfig, RISK_FREE_RATE
+from .config import (
+    ControlConfig,
+    ExperimentConfig,
+    PipelineConfig,
+    RISK_FREE_RATE,
+    get_active_benchmark_label,
+)
 
 
 def _daily_returns_from_path(path: list[float] | np.ndarray) -> np.ndarray:
@@ -357,6 +363,9 @@ def _control_component_label(label: str) -> str:
 
 
 def _display_label(label: str) -> str:
+    benchmark_label = get_active_benchmark_label()
+    if label == benchmark_label:
+        return benchmark_label
     mapping = {
         'factor_only': 'Factor Only',
         'alpha_engine_no_control': 'No Control\n(Alpha Engine)',
@@ -365,7 +374,7 @@ def _display_label(label: str) -> str:
         'portfolio_rl_fixed_weights': 'Portfolio RL\nFixed Weights',
         'full_pipeline': 'Full\nPipeline',
         'full_pipeline_fixed_weights': 'Full Pipeline\nFixed Weights',
-        'SPY': 'SPY',
+        'SPY': benchmark_label,
         'factor_benchmark': 'Factor Benchmark',
         'vol_target': 'Vol-Target',
         'dd_delever': 'DD-Delever',
@@ -586,7 +595,8 @@ def _build_robustness_summary(
     }
 
     if not rolling_references.empty:
-        spy = rolling_references[rolling_references['label'] == 'SPY'].copy()
+        benchmark_label = get_active_benchmark_label()
+        spy = rolling_references[rolling_references['label'] == benchmark_label].copy()
         factor = rolling_references[rolling_references['label'] == 'factor_benchmark'].copy()
 
         if not spy.empty:

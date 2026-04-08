@@ -158,7 +158,7 @@ ASSET_GROUPS_B = {
 
 # ---- Universe C: European equities (zero overlap with A/B) ----
 UNIVERSE_C = list(dict.fromkeys([
-    'ADS.DE', 'ALV.DE', 'ASML.AS', 'INGA.AS', 'SAP.DE', 'SIE.DE', 'DTE.DE', 'IFX.DE',
+    'ADS.DE', 'ALV.DE', 'ASML.AS', 'PRX.AS', 'INGA.AS', 'SAP.DE', 'SIE.DE', 'DTE.DE', 'IFX.DE',
     'MUV2.DE', 'RWE.DE', 'BMW.DE', 'MBG.DE', 'VOW3.DE', 'BAS.DE', 'BAYN.DE', 'DHL.DE',
     'BEI.DE', 'AIR.PA', 'AI.PA', 'BNP.PA', 'CAP.PA', 'CS.PA', 'DG.PA', 'ENGI.PA',
     'MC.PA', 'OR.PA', 'RI.PA', 'SAN.PA', 'SU.PA', 'TTE.PA', 'VIE.PA', 'AZN.L',
@@ -471,12 +471,7 @@ class OptimizerConfig:
     adaptive_allocator_group_cap_scale_range: tuple[float, float] = (0.85, 1.05)
     adaptive_allocator_policy_version: int = 1
     group_caps: dict[str, float] = field(
-        default_factory=lambda: {
-            group: 0.40 for group in (
-                ASSET_GROUPS_EXPANDED if UNIVERSE is UNIVERSE_EXPANDED
-                else ASSET_GROUPS_CORE
-            )
-        }
+        default_factory=lambda: {group: 0.40 for group in ASSET_GROUPS}
     )
 
     def __post_init__(self) -> None:
@@ -899,7 +894,7 @@ class EvaluationConfig:
         if not self.meta_learning_universes:
             raise ValueError("meta_learning_universes must be non-empty")
         for idx, value in enumerate(self.meta_learning_universes):
-            _validate_choice(f'meta_learning_universes[{idx}]', value, ('A', 'B'))
+            _validate_choice(f'meta_learning_universes[{idx}]', value, ('A', 'B', 'C', 'D', 'E', 'A_LIQUID'))
 
 
 @dataclass
@@ -911,10 +906,22 @@ class UniverseProfile:
     pairs: list[tuple[str, str]]
     lstm_tickers: list[str]
     asset_groups: dict[str, list[str]]
+    benchmark_label: str
+    benchmark_components: tuple[tuple[str, float], ...]
+    benchmark_rebalance: str = 'buyhold'
+    data_start: str | None = None
+    data_end: str | None = None
+    rebalance_frequency: str = 'daily'
+    role: str = ''
+
+
+def get_active_benchmark_label() -> str:
+    """Return the currently active benchmark label."""
+    return str(BENCHMARK)
 
 
 def get_universe_profile(universe_id: str) -> UniverseProfile:
-    """Return a complete universe profile by ID ('A' or 'B')."""
+    """Return a complete universe profile by ID."""
     if universe_id == 'A':
         return UniverseProfile(
             label='A',
@@ -922,6 +929,12 @@ def get_universe_profile(universe_id: str) -> UniverseProfile:
             pairs=list(PAIRS_CANDIDATES_EXPANDED),
             lstm_tickers=list(LSTM_TICKERS_EXPANDED),
             asset_groups=dict(ASSET_GROUPS_EXPANDED),
+            benchmark_label='SPY',
+            benchmark_components=(('SPY', 1.0),),
+            data_start='2013-04-01',
+            data_end='2026-04-01',
+            rebalance_frequency='daily',
+            role='Primary U.S. large/mid-cap equity universe',
         )
     if universe_id == 'B':
         return UniverseProfile(
@@ -930,8 +943,71 @@ def get_universe_profile(universe_id: str) -> UniverseProfile:
             pairs=list(PAIRS_CANDIDATES_B),
             lstm_tickers=list(LSTM_TICKERS_B),
             asset_groups=dict(ASSET_GROUPS_B),
+            benchmark_label='SPY',
+            benchmark_components=(('SPY', 1.0),),
+            data_start='2013-04-01',
+            data_end='2026-04-01',
+            rebalance_frequency='daily',
+            role='Zero-overlap U.S. mid-cap / biotech / REIT tilt robustness universe',
         )
-    raise ValueError(f"Unknown universe ID: {universe_id!r}. Choose 'A' or 'B'.")
+    if universe_id == 'C':
+        return UniverseProfile(
+            label='C',
+            tickers=list(UNIVERSE_C),
+            pairs=list(PAIRS_CANDIDATES_C),
+            lstm_tickers=list(LSTM_TICKERS_C),
+            asset_groups=dict(ASSET_GROUPS_C),
+            benchmark_label='VGK',
+            benchmark_components=(('VGK', 1.0),),
+            data_start='2014-01-01',
+            data_end='2026-04-01',
+            rebalance_frequency='daily',
+            role='European equity generalization universe',
+        )
+    if universe_id == 'D':
+        return UniverseProfile(
+            label='D',
+            tickers=list(UNIVERSE_D),
+            pairs=list(PAIRS_CANDIDATES_D),
+            lstm_tickers=list(LSTM_TICKERS_D),
+            asset_groups=dict(ASSET_GROUPS_D),
+            benchmark_label='EEM',
+            benchmark_components=(('EEM', 1.0),),
+            data_start='2015-01-01',
+            data_end='2026-04-01',
+            rebalance_frequency='daily',
+            role='Emerging-markets high-volatility universe with the sharpest operator prediction',
+        )
+    if universe_id == 'E':
+        return UniverseProfile(
+            label='E',
+            tickers=list(UNIVERSE_E),
+            pairs=list(PAIRS_CANDIDATES_E),
+            lstm_tickers=list(LSTM_TICKERS_E),
+            asset_groups=dict(ASSET_GROUPS_E),
+            benchmark_label='60/40',
+            benchmark_components=(('SPY', 0.60), ('TLT', 0.40)),
+            benchmark_rebalance='monthly',
+            data_start='2014-01-01',
+            data_end='2026-04-01',
+            rebalance_frequency='daily',
+            role='Multi-asset secondary stress-test universe',
+        )
+    if universe_id == 'A_LIQUID':
+        return UniverseProfile(
+            label='A-Liquid',
+            tickers=list(UNIVERSE_A_LIQUID),
+            pairs=list(PAIRS_CANDIDATES_A_LIQUID),
+            lstm_tickers=list(LSTM_TICKERS_A_LIQUID),
+            asset_groups=dict(ASSET_GROUPS_A_LIQUID),
+            benchmark_label='SPY',
+            benchmark_components=(('SPY', 1.0),),
+            data_start='2013-04-01',
+            data_end='2026-04-01',
+            rebalance_frequency='weekly',
+            role='Weekly-rebalanced liquidity robustness slice of Universe A',
+        )
+    raise ValueError(f"Unknown universe ID: {universe_id!r}. Choose one of 'A', 'B', 'C', 'D', 'E', or 'A_LIQUID'.")
 
 
 @contextmanager
@@ -939,7 +1015,8 @@ def use_universe(universe_id: str):
     """Temporarily swap the active universe across all quant_stack modules.
 
     This context manager patches the module-level UNIVERSE,
-    PAIRS_CANDIDATES, LSTM_TICKERS, ASSET_GROUPS, and TICKER_TO_GROUP
+    PAIRS_CANDIDATES, LSTM_TICKERS, ASSET_GROUPS, TICKER_TO_GROUP,
+    benchmark settings, and date window
     constants in every module that imports them, so that
     ``load_market_data()`` and ``run_full_pipeline()`` operate on the
     requested universe without permanent side effects.
@@ -970,8 +1047,20 @@ def use_universe(universe_id: str):
         'cfg_LSTM': getattr(_cfg, 'LSTM_TICKERS', None),
         'cfg_ASSET_GROUPS': getattr(_cfg, 'ASSET_GROUPS', None),
         'cfg_TICKER_TO_GROUP': getattr(_cfg, 'TICKER_TO_GROUP', None),
+        'cfg_BENCHMARK': getattr(_cfg, 'BENCHMARK', None),
+        'cfg_BENCHMARK_COMPONENTS': getattr(_cfg, 'BENCHMARK_COMPONENTS', None),
+        'cfg_BENCHMARK_REBALANCE': getattr(_cfg, 'BENCHMARK_REBALANCE', None),
+        'cfg_DATA_START': getattr(_cfg, 'DATA_START', None),
+        'cfg_DATA_END': getattr(_cfg, 'DATA_END', None),
         'data_UNIVERSE': _data.UNIVERSE,
+        'data_BENCHMARK': _data.BENCHMARK,
+        'data_BENCHMARK_COMPONENTS': getattr(_data, 'BENCHMARK_COMPONENTS', None),
+        'data_DATA_START': getattr(_data, 'DATA_START', None),
+        'data_DATA_END': getattr(_data, 'DATA_END', None),
         'pipeline_UNIVERSE': _pipeline.UNIVERSE,
+        'pipeline_BENCHMARK': getattr(_pipeline, 'BENCHMARK', None),
+        'pipeline_BENCHMARK_COMPONENTS': getattr(_pipeline, 'BENCHMARK_COMPONENTS', None),
+        'pipeline_BENCHMARK_REBALANCE': getattr(_pipeline, 'BENCHMARK_REBALANCE', None),
         'alpha_UNIVERSE': _alpha.UNIVERSE,
         'alpha_PAIRS': _alpha.PAIRS_CANDIDATES,
         'alpha_TICKER_TO_GROUP': _alpha.TICKER_TO_GROUP,
@@ -984,10 +1073,22 @@ def use_universe(universe_id: str):
         _cfg.LSTM_TICKERS = profile.lstm_tickers
         _cfg.ASSET_GROUPS = profile.asset_groups
         _cfg.TICKER_TO_GROUP = new_ticker_to_group
+        _cfg.BENCHMARK = profile.benchmark_label
+        _cfg.BENCHMARK_COMPONENTS = tuple(profile.benchmark_components)
+        _cfg.BENCHMARK_REBALANCE = profile.benchmark_rebalance
+        _cfg.DATA_START = profile.data_start
+        _cfg.DATA_END = profile.data_end
 
         # Patch downstream modules that imported at module level
         _data.UNIVERSE = profile.tickers
+        _data.BENCHMARK = profile.benchmark_label
+        _data.BENCHMARK_COMPONENTS = tuple(profile.benchmark_components)
+        _data.DATA_START = profile.data_start
+        _data.DATA_END = profile.data_end
         _pipeline.UNIVERSE = profile.tickers
+        _pipeline.BENCHMARK = profile.benchmark_label
+        _pipeline.BENCHMARK_COMPONENTS = tuple(profile.benchmark_components)
+        _pipeline.BENCHMARK_REBALANCE = profile.benchmark_rebalance
         _alpha.UNIVERSE = profile.tickers
         _alpha.PAIRS_CANDIDATES = profile.pairs
         _alpha.TICKER_TO_GROUP = new_ticker_to_group
@@ -1000,8 +1101,20 @@ def use_universe(universe_id: str):
         _cfg.LSTM_TICKERS = saved['cfg_LSTM']
         _cfg.ASSET_GROUPS = saved['cfg_ASSET_GROUPS']
         _cfg.TICKER_TO_GROUP = saved['cfg_TICKER_TO_GROUP']
+        _cfg.BENCHMARK = saved['cfg_BENCHMARK']
+        _cfg.BENCHMARK_COMPONENTS = saved['cfg_BENCHMARK_COMPONENTS']
+        _cfg.BENCHMARK_REBALANCE = saved['cfg_BENCHMARK_REBALANCE']
+        _cfg.DATA_START = saved['cfg_DATA_START']
+        _cfg.DATA_END = saved['cfg_DATA_END']
         _data.UNIVERSE = saved['data_UNIVERSE']
+        _data.BENCHMARK = saved['data_BENCHMARK']
+        _data.BENCHMARK_COMPONENTS = saved['data_BENCHMARK_COMPONENTS']
+        _data.DATA_START = saved['data_DATA_START']
+        _data.DATA_END = saved['data_DATA_END']
         _pipeline.UNIVERSE = saved['pipeline_UNIVERSE']
+        _pipeline.BENCHMARK = saved['pipeline_BENCHMARK']
+        _pipeline.BENCHMARK_COMPONENTS = saved['pipeline_BENCHMARK_COMPONENTS']
+        _pipeline.BENCHMARK_REBALANCE = saved['pipeline_BENCHMARK_REBALANCE']
         _alpha.UNIVERSE = saved['alpha_UNIVERSE']
         _alpha.PAIRS_CANDIDATES = saved['alpha_PAIRS']
         _alpha.TICKER_TO_GROUP = saved['alpha_TICKER_TO_GROUP']

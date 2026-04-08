@@ -29,6 +29,7 @@ from .config import (
     EvaluationConfig,
     PipelineConfig,
     UniverseProfile,
+    get_active_benchmark_label,
     get_universe_profile,
     use_universe,
 )
@@ -355,6 +356,7 @@ def run_research_evaluation(
     base_config = copy.deepcopy(base_config or PipelineConfig())
     evaluation_config = evaluation_config or EvaluationConfig()
     universe_id = universe_id or 'A'
+    benchmark_label = get_active_benchmark_label()
     if export_paper_tables is None:
         export_paper_tables = universe_id == 'A'
     macro_data = macro_data if macro_data is not None else pd.DataFrame(index=returns.index)
@@ -673,8 +675,8 @@ def run_research_evaluation(
         row.update({'suite': 'rolling_window', 'window_id': window_id, 'param_name': 'window_start', 'param_value': str(r_slice.index[0].date())})
         metric_rows.append(row)
         regime_rows.extend(_regime_summary(results))
-        spy_row = _path_metric_summary(results['spy'], 'SPY')
-        spy_row.update({'suite': 'rolling_reference', 'window_id': window_id, 'param_name': 'benchmark', 'param_value': 'SPY'})
+        spy_row = _path_metric_summary(results['spy'], benchmark_label)
+        spy_row.update({'suite': 'rolling_reference', 'window_id': window_id, 'param_name': 'benchmark', 'param_value': benchmark_label})
         rolling_reference_rows.append(spy_row)
         factor_row = _path_metric_summary(results['factor'], 'factor_benchmark')
         factor_row.update({'suite': 'rolling_reference', 'window_id': window_id, 'param_name': 'benchmark', 'param_value': 'factor_benchmark'})
@@ -888,7 +890,7 @@ def run_research_evaluation(
     if baseline_results is not None:
         bootstrap_paths = {
             'full_pipeline': baseline_results.get('wealth', [1.0]),
-            'SPY': baseline_results.get('spy', [1.0]),
+            benchmark_label: baseline_results.get('spy', [1.0]),
             'factor_benchmark': baseline_results.get('factor', [1.0]),
             'vol_target': baseline_results.get('voltarget', [1.0]),
             'dd_delever': baseline_results.get('ddlever', [1.0]),
@@ -903,7 +905,7 @@ def run_research_evaluation(
         bootstrap_significance = _compute_bootstrap_pairwise_significance(
             path_map=bootstrap_paths,
             base_label='full_pipeline',
-            compare_labels=['SPY', 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
+            compare_labels=[benchmark_label, 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
             n_samples=evaluation_config.bootstrap_samples,
             block_size=evaluation_config.bootstrap_block_size,
             seed=evaluation_config.bootstrap_seed,
@@ -919,7 +921,7 @@ def run_research_evaluation(
             None,
         )
         if spy_reference is not None:
-            control_path_map['SPY'] = spy_reference
+            control_path_map[benchmark_label] = spy_reference
 
         significance_frames: list[pd.DataFrame] = []
         significance_bases = [
@@ -951,7 +953,7 @@ def run_research_evaluation(
                     'G_plus_convexity',
                     'F_cmdp_lagrangian',
                     'RL_q_learning',
-                    'SPY',
+                    benchmark_label,
                 ]
                 if label in control_path_map and label != base_label
             ]
@@ -976,7 +978,7 @@ def run_research_evaluation(
         jk_table = _compute_jobson_korkie_table(
             path_map=bootstrap_paths,
             base_label='full_pipeline',
-            compare_labels=['SPY', 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
+            compare_labels=[benchmark_label, 'factor_benchmark', 'vol_target', 'dd_delever', 'e2e_rl'],
         )
         if not jk_table.empty:
             jk_table.to_csv(output_dir / 'research_jobson_korkie.csv', index=False)

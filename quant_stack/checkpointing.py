@@ -16,8 +16,9 @@ import numpy as np
 import pandas as pd
 
 from .config import PipelineConfig
+from .config import BENCHMARK, BENCHMARK_COMPONENTS, BENCHMARK_REBALANCE, DATA_END, DATA_START
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
 
 
 def _normalize_checkpoint_value(value: object) -> object:
@@ -204,6 +205,19 @@ def _canonical_checkpoint_metadata(metadata: dict[str, object]) -> dict[str, obj
     for key in ('prices', 'volumes', 'returns', 'macro', 'sec_quality'):
         if key in canonical:
             canonical[key] = _normalize_checkpoint_value(canonical[key])
+    for key in (
+        'schema_version',
+        'run_key',
+        'suite',
+        'include_e2e',
+        'benchmark_label',
+        'benchmark_components',
+        'benchmark_rebalance',
+        'data_start',
+        'data_end',
+    ):
+        if key in canonical:
+            canonical[key] = _normalize_checkpoint_value(canonical[key])
     return canonical
 
 
@@ -287,6 +301,11 @@ def _checkpoint_metadata(
         'run_key': run_key,
         'suite': suite,
         'include_e2e': include_e2e,
+        'benchmark_label': BENCHMARK,
+        'benchmark_components': tuple(BENCHMARK_COMPONENTS),
+        'benchmark_rebalance': BENCHMARK_REBALANCE,
+        'data_start': DATA_START,
+        'data_end': DATA_END,
         'config': asdict(run_config),
         'prices': _frame_signature(run_prices),
         'volumes': _frame_signature(run_volumes),
@@ -306,6 +325,11 @@ def _compatible_checkpoint_view(metadata: dict[str, object]) -> dict[str, object
         'suite': metadata.get('suite'),
         'include_e2e': metadata.get('include_e2e'),
         'config': metadata.get('config'),
+        'benchmark_label': metadata.get('benchmark_label'),
+        'benchmark_components': metadata.get('benchmark_components'),
+        'benchmark_rebalance': metadata.get('benchmark_rebalance'),
+        'data_start': metadata.get('data_start'),
+        'data_end': metadata.get('data_end'),
         'prices_columns': tuple(prices.get('columns', ()) or ()),
         'volumes_columns': tuple(volumes.get('columns', ()) or ()),
         'returns_columns': tuple(returns.get('columns', ()) or ()),
@@ -319,6 +343,11 @@ def _config_only_checkpoint_view(metadata: dict[str, object]) -> dict[str, objec
         'suite': metadata.get('suite'),
         'include_e2e': metadata.get('include_e2e'),
         'config': metadata.get('config'),
+        'benchmark_label': metadata.get('benchmark_label'),
+        'benchmark_components': metadata.get('benchmark_components'),
+        'benchmark_rebalance': metadata.get('benchmark_rebalance'),
+        'data_start': metadata.get('data_start'),
+        'data_end': metadata.get('data_end'),
     }
 
 

@@ -15,7 +15,10 @@ from scipy import stats as sp_stats
 from .config import (
     BLS_SERIES,
     BENCHMARK,
+    BENCHMARK_COMPONENTS,
     DATA_PERIOD,
+    DATA_END,
+    DATA_START,
     FRED_SERIES,
     SEC_USER_AGENT,
     TREASURY_SECURITIES,
@@ -53,8 +56,17 @@ def load_market_data(
     else:
         print("STAGE 1: Loading Market Data")
     print("=" * 60)
-    all_tickers = list(set(UNIVERSE + [BENCHMARK]))
-    data = yf.download(all_tickers, period=DATA_PERIOD, auto_adjust=True)
+    benchmark_tickers = [ticker for ticker, weight in BENCHMARK_COMPONENTS if float(weight) > 0.0]
+    all_tickers = list(dict.fromkeys(list(UNIVERSE) + benchmark_tickers))
+    download_kwargs = {'auto_adjust': True}
+    if DATA_START or DATA_END:
+        download_kwargs.update({
+            'start': DATA_START,
+            'end': DATA_END,
+        })
+    else:
+        download_kwargs['period'] = DATA_PERIOD
+    data = yf.download(all_tickers, **download_kwargs)
     prices, volumes, returns, dropped_tickers = _sanitize_ohlcv_download(data, all_tickers)
 
     if prices.empty or volumes.empty or returns.empty:
@@ -62,9 +74,10 @@ def load_market_data(
             "No market data was downloaded from yfinance. "
             "Check network access or the upstream data source and try again."
         )
-    if BENCHMARK not in prices.columns:
+    missing_benchmarks = [ticker for ticker in benchmark_tickers if ticker not in prices.columns]
+    if missing_benchmarks:
         raise RuntimeError(
-            f"Benchmark {BENCHMARK} was not downloaded from yfinance. "
+            f"Benchmark components {missing_benchmarks} for {BENCHMARK} were not downloaded from yfinance. "
             "Check network access or try again."
         )
     if dropped_tickers:
@@ -74,6 +87,7 @@ def load_market_data(
     sec_quality_scores = load_sec_quality_scores([t for t in UNIVERSE if t in prices.columns])
 
     print(f"  Loaded {len(prices)} trading days for {len(all_tickers)} tickers")
+    print(f"  Benchmark: {BENCHMARK} via {benchmark_tickers}")
     print(f"  Date range: {prices.index[0].date()} to {prices.index[-1].date()}")
     if not macro_data.empty:
         print(f"  Macro features loaded: {list(macro_data.columns)}")

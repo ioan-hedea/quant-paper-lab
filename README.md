@@ -56,7 +56,7 @@ In short:
 ---
 ## Key Features
 
-- two-universe evaluation protocol (`Universe A` and `Universe B`, zero ticker overlap)
+- multi-universe evaluation registry (`A`, `B`, `C`, `D`, `E`, plus `A-Liquid` weekly robustness protocol)
 - reproducible research bundles (`results/<timestamp>_universe_*`)
 - checkpoint-aware reruns (`checkpoints/research_runs/...`)
 - cross-universe transfer/meta-learning evaluation
